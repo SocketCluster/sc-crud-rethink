@@ -1,0 +1,21 @@
+{
+  "name": "sc-rest-rethink",
+  "version": "1.0.0",
+  "description": "A realtime REST layer plugin for SC using RethinkDB as the database",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "rethinkdb": "2.1.0"
+  },
+  "keywords": [
+    "rethinkdb",
+    "socketcluster",
+    "realtime",
+    "storage",
+    "rest"
+  ],
+  "author": "Jonathan Gros-Dubois",
+  "license": "MIT"
+}
