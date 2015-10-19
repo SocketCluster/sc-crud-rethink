@@ -3,8 +3,8 @@ var thinky = require('thinky');
 var async = require('async');
 
 /*
-  TODO: Better errors for the client-side
   TODO: Allow specifying maximum realtime offset
+  TODO: Better errors for the client-side
   TODO: Allow getting the count of a collection
 */
 
@@ -168,6 +168,10 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
   }
 };
 
+SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
+  return this.options.maximumRealtimeOffset == null || offset <= this.options.maximumRealtimeOffset;
+};
+
 SCCRUDRethink.prototype.create = function (query, callback) {
   var self = this;
 
@@ -180,11 +184,13 @@ SCCRUDRethink.prototype.create = function (query, callback) {
       self._getDocumentViewOffsets(result.id, query, function (err, viewOffets) {
         if (!err) {
           _.forOwn(viewOffets, function (offsetData, viewName) {
-            self.scServer.global.publish(viewName + ':' + query.type, {
-              type: 'create',
-              id: offsetData.id,
-              offset: offsetData.offset
-            });
+            if (self._isWithinRealtimeBounds(offsetData.offset)) {
+              self.scServer.global.publish(viewName + ':' + query.type, {
+                type: 'create',
+                id: offsetData.id,
+                offset: offsetData.offset
+              });
+            }
           });
         }
       });
@@ -286,18 +292,22 @@ SCCRUDRethink.prototype.update = function (query, callback) {
             newOffsetData = newOffsetData || {};
 
             if (oldOffsetData.offset != newOffsetData.offset) {
-              self.scServer.global.publish(viewName + ':' + query.type, {
-                type: 'update',
-                freshness: 'old',
-                id: query.id,
-                offset: oldOffsetData.offset
-              });
-              self.scServer.global.publish(viewName + ':' + query.type, {
-                type: 'update',
-                freshness: 'new',
-                id: query.id,
-                offset: newOffsetData.offset
-              });
+              if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
+                self.scServer.global.publish(viewName + ':' + query.type, {
+                  type: 'update',
+                  freshness: 'old',
+                  id: query.id,
+                  offset: oldOffsetData.offset
+                });
+              }
+              if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
+                self.scServer.global.publish(viewName + ':' + query.type, {
+                  type: 'update',
+                  freshness: 'new',
+                  id: query.id,
+                  offset: newOffsetData.offset
+                });
+              }
             }
           });
         }
@@ -390,11 +400,13 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
       self._getDocumentViewOffsets(query.id, query, function (err, viewOffets) {
         if (!err) {
           _.forOwn(viewOffets, function (offsetData, viewName) {
-            self.scServer.global.publish(viewName + ':' + query.type, {
-              type: 'delete',
-              id: query.id,
-              offset: offsetData.offset
-            });
+            if (self._isWithinRealtimeBounds(offsetData.offset)) {
+              self.scServer.global.publish(viewName + ':' + query.type, {
+                type: 'delete',
+                id: query.id,
+                offset: offsetData.offset
+              });
+            }
           });
         }
         ModelClass.get(query.id).delete({returnChanges: true}).run(deletedHandler);
