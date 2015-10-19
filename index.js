@@ -225,13 +225,8 @@ SCCRUDRethink.prototype.read = function (query, callback) {
         var resultCount = Math.min(data.length, pageSize);
 
         for (var i = 0; i < resultCount; i++) {
-          if (data[i]) {
-            documentList.push(data[i]);
-          } else {
-            documentList.push({id: null});
-          }
+          documentList.push(data[i].id || null);
         }
-
         result = {
           data: documentList
         };
