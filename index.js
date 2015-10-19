@@ -2,12 +2,6 @@ var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
 
-/*
-  TODO: Allow specifying maximum realtime offset
-  TODO: Better errors for the client-side
-  TODO: Allow getting the count of a collection
-*/
-
 var SCCRUDRethink = function (worker, options) {
   var self = this;
 
@@ -172,6 +166,20 @@ SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
   return this.options.maximumRealtimeOffset == null || offset <= this.options.maximumRealtimeOffset;
 };
 
+SCCRUDRethink.prototype._formatErrorResponse = function (err) {
+  if (err == null) {
+    return 'Unknown CRUD error';
+  }
+  if (err.message) {
+    return err.message;
+  }
+  if (typeof err == 'string') {
+    return err;
+  }
+  return JSON.stringify(err);
+};
+
+
 SCCRUDRethink.prototype.create = function (query, callback) {
   var self = this;
 
@@ -179,7 +187,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
 
   var savedHandler = function (err, result) {
     if (err) {
-      callback && callback(err);
+      callback && callback(self._formatErrorResponse(err));
     } else {
       self._getDocumentViewOffsets(result.id, query, function (err, viewOffets) {
         if (!err) {
@@ -212,9 +220,10 @@ SCCRUDRethink.prototype.read = function (query, callback) {
   var self = this;
 
   var pageSize = query.pageSize || this.options.defaultPageSize;
-  var loadedHandler = function (err, data) {
+
+  var loadedHandler = function (err, data, count) {
     if (err) {
-      callback && callback(err);
+      callback && callback(self._formatErrorResponse(err));
     } else {
       var result;
       if (query.id) {
@@ -237,6 +246,10 @@ SCCRUDRethink.prototype.read = function (query, callback) {
           data: documentList
         };
 
+        if (query.getCount) {
+          result.count = count;
+        }
+
         if (data.length < pageSize + 1) {
           result.isLastPage = true;
         }
@@ -255,17 +268,37 @@ SCCRUDRethink.prototype.read = function (query, callback) {
     } else {
       var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query, query.view);
 
+      var tasks = [];
+
       if (query.offset) {
-        rethinkQuery.slice(query.offset, query.offset + pageSize + 1).pluck('id').run(loadedHandler);
+        tasks.push(function (cb) {
+          // Get one extra record just to check if we have the last value in the sequence.
+          rethinkQuery.slice(query.offset, query.offset + pageSize + 1).pluck('id').run(cb);
+        });
       } else {
-        // Get one extra record just to check if we have the last value in the sequence.
-        rethinkQuery.limit(pageSize + 1).pluck('id').run(loadedHandler);
+        tasks.push(function (cb) {
+          // Get one extra record just to check if we have the last value in the sequence.
+          rethinkQuery.limit(pageSize + 1).pluck('id').run(cb);
+        });
       }
+
+      if (query.getCount) {
+        tasks.push(function (cb) {
+          rethinkQuery.count().execute(cb);
+        });
+      }
+
+      async.parallel(tasks, function (err, results) {
+        if (err) {
+          loadedHandler(err);
+        } else {
+          loadedHandler(err, results[0], results[1]);
+        }
+      });
     }
   }
 };
 
-// TODO: Don't allow changing the id
 SCCRUDRethink.prototype.update = function (query, callback) {
   var self = this;
 
@@ -313,7 +346,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
         }
       });
     }
-    callback && callback(err);
+    callback && callback(self._formatErrorResponse(err));
   };
 
   var ModelClass = this.models[query.type];
@@ -325,16 +358,20 @@ SCCRUDRethink.prototype.update = function (query, callback) {
     var tasks = [];
 
     if (query.field) {
-      tasks.push(function (cb) {
-        self._getDocumentViewOffsets(query.id, query, cb);
-      });
+      if (query.field == 'id') {
+        savedHandler('Cannot modify the id field of an existing document');
+      } else {
+        tasks.push(function (cb) {
+          self._getDocumentViewOffsets(query.id, query, cb);
+        });
 
-      tasks.push(function (cb) {
-        ModelClass.get(query.id).run().then(function (instance) {
-          instance[query.field] = query.value;
-          instance.save(cb);
-        }).error(cb);
-      });
+        tasks.push(function (cb) {
+          ModelClass.get(query.id).run().then(function (instance) {
+            instance[query.field] = query.value;
+            instance.save(cb);
+          }).error(cb);
+        });
+      }
     } else {
       if (typeof query.value == 'object') {
         if (query.value.id == null) {
@@ -387,7 +424,7 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
         });
       }
     }
-    callback && callback(err);
+    callback && callback(self._formatErrorResponse(err));
   };
 
   var ModelClass = this.models[query.type];
