@@ -1,10 +1,14 @@
 {
   "name": "sc-crud-rethink",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A realtime REST layer plugin for SC using RethinkDB as the database",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/socketcluster/sc-crud-rethink.git"
   },
   "dependencies": {
     "async": "1.4.2",
