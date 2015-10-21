@@ -30,9 +30,16 @@ var SCCRUDRethink = function (worker, options) {
   });
 };
 
-SCCRUDRethink.prototype._getViewMetaData = function (type, view) {
-  var modelViews = this.schema[type].views || {};
-  var viewSchema = modelViews[view] || {};
+SCCRUDRethink.prototype._isValidView = function (type, viewName) {
+  var typeSchema = this.schema[type] || {};
+  var modelViews = typeSchema.views || {};
+  return modelViews.hasOwnProperty(viewName);
+};
+
+SCCRUDRethink.prototype._getViewMetaData = function (type, viewName) {
+  var typeSchema = this.schema[type] || {};
+  var modelViews = typeSchema.views || {};
+  var viewSchema = modelViews[viewName] || {};
 
   return {
     filter:  viewSchema.filter,
@@ -40,8 +47,8 @@ SCCRUDRethink.prototype._getViewMetaData = function (type, view) {
   };
 };
 
-SCCRUDRethink.prototype._constructOrderedFilteredRethinkQuery = function (ModelClass, type, view, predicateData) {
-  var viewMetaData = this._getViewMetaData(type, view);
+SCCRUDRethink.prototype._constructOrderedFilteredRethinkQuery = function (ModelClass, type, viewName, predicateData) {
+  var viewMetaData = this._getViewMetaData(type, viewName);
   var rethinkQuery = ModelClass;
 
   var sanitizedPredicateData;
@@ -78,22 +85,24 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
       callback(null, {});
     } else {
       _.forOwn(optimizationMap, function (predicateData, viewName) {
-        tasks.push(function (cb) {
-          var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, viewName, predicateData);
+        if (self._isValidView(query.type, viewName)) {
+          tasks.push(function (cb) {
+            var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, viewName, predicateData);
 
-          rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
-            if (err) {
-              cb(err);
-            } else {
-              cb(null, {
-                view: viewName,
-                id: documentId,
-                predicateData: predicateData,
-                offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
-              });
-            }
+            rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
+              if (err) {
+                cb(err);
+              } else {
+                cb(null, {
+                  view: viewName,
+                  id: documentId,
+                  predicateData: predicateData,
+                  offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
+                });
+              }
+            });
           });
-        });
+        }
       });
 
       async.parallel(tasks, function (err, results) {
