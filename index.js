@@ -379,8 +379,18 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
         tasks.push(function (cb) {
           // Replace the whole document
-          // ModelClass.get(query.id).replace(query.value, {returnChanges: true}).execute(cb);
-          self.thinky.r.table(query.type).get(query.id).replace(query.value, {returnChanges: true}).run(cb);
+          var error;
+          try {
+            var instance = new ModelClass(query.value);
+            instance.validate();
+          } catch (e) {
+            error = e;
+          }
+          if (error) {
+            savedHandler(error);
+          } else {
+            self.thinky.r.table(query.type).get(query.id).replace(query.value, {returnChanges: true}).run(cb);
+          }
         });
       } else {
         savedHandler('Cannot replace document with a primitive - Must be an object');
