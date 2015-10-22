@@ -14,6 +14,7 @@ var SCCRUDRethink = function (worker, options) {
 
   this.thinky = thinky(this.options.thinkyOptions);
 
+  this.maxPredicateDataCount = this.options.maxPredicateDataCount || 100;
   this.channelPrefix = 'crud>';
 
   if (!this.options.defaultPageSize) {
@@ -84,24 +85,37 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
     if (optimizationMap == null) {
       callback(null, {});
     } else {
-      _.forOwn(optimizationMap, function (predicateData, viewName) {
+      _.forOwn(optimizationMap, function (predicateDataList, viewName) {
         if (self._isValidView(query.type, viewName)) {
-          tasks.push(function (cb) {
-            var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, viewName, predicateData);
+          if (!(predicateDataList instanceof Array)) {
+            predicateDataList = [predicateDataList];
+          }
 
-            rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
-              if (err) {
-                cb(err);
-              } else {
-                cb(null, {
-                  view: viewName,
-                  id: documentId,
-                  predicateData: predicateData,
-                  offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
+          if (predicateDataList.length <= self.maxPredicateDataCount) {
+            predicateDataList.forEach(function (predicateData) {
+              tasks.push(function (cb) {
+                var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, viewName, predicateData);
+
+                rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
+                  if (err) {
+                    cb(err);
+                  } else {
+                    cb(null, {
+                      view: viewName,
+                      id: documentId,
+                      predicateData: predicateData,
+                      offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
+                    });
+                  }
                 });
-              }
+              });
             });
-          });
+          } else {
+            tasks.push(function (cb) {
+              cb('Optimization failure - The length of the predicate data array for the view ' + viewName +
+                ' exceeded the maxPredicateDataCount of ' + self.maxPredicateDataCount);
+            });
+          }
         }
       });
 
