@@ -3,8 +3,6 @@ Realtime CRUD data management layer/plugin for SocketCluster using RethinkDB as 
 
 See https://github.com/socketcluster/sc-sample-inventory for a full working sample.
 
-[![GREAT CRUD](https://raw.github.com/SocketCluster/sc-crud-rethink/master/assets/great-crud.gif)](https://github.com/SocketCluster/sc-sample-inventory)
-
 ## Setup
 
 See https://github.com/socketcluster/sc-sample-inventory for sample app which demonstrates this component in action.
