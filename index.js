@@ -10,8 +10,6 @@ var SCCRUDRethink = function (worker, options) {
   this.models = {};
 
   this.schema = this.options.schema || {};
-  this.orders = this.options.orders || {};
-
   this.thinky = thinky(this.options.thinkyOptions);
 
   this.maxPredicateDataCount = this.options.maxPredicateDataCount || 100;
@@ -43,12 +41,11 @@ SCCRUDRethink.prototype._getViewMetaData = function (type, viewName) {
   var viewSchema = modelViews[viewName] || {};
 
   return {
-    filter:  viewSchema.filter,
-    order: viewSchema.order
+    transform: viewSchema.transform
   };
 };
 
-SCCRUDRethink.prototype._constructOrderedFilteredRethinkQuery = function (ModelClass, type, viewName, predicateData) {
+SCCRUDRethink.prototype._constructTransformedRethinkQuery = function (ModelClass, type, viewName, predicateData) {
   var viewMetaData = this._getViewMetaData(type, viewName);
   var rethinkQuery = ModelClass;
 
@@ -59,17 +56,11 @@ SCCRUDRethink.prototype._constructOrderedFilteredRethinkQuery = function (ModelC
     sanitizedPredicateData = predicateData;
   }
 
-  var filterFn = viewMetaData.filter;
-  if (filterFn) {
-    var filter = filterFn(this.thinky.r, sanitizedPredicateData);
-    rethinkQuery = rethinkQuery.filter(filter);
+  var transformFn = viewMetaData.transform;
+  if (transformFn) {
+    rethinkQuery = transformFn(rethinkQuery, this.thinky.r, sanitizedPredicateData);
   }
 
-  var orderFn = viewMetaData.order;
-  if (orderFn) {
-    var order = orderFn(this.thinky.r, sanitizedPredicateData);
-    rethinkQuery = rethinkQuery.orderBy(order);
-  }
   return rethinkQuery;
 };
 
@@ -94,7 +85,7 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
           if (predicateDataList.length <= self.maxPredicateDataCount) {
             predicateDataList.forEach(function (predicateData) {
               tasks.push(function (cb) {
-                var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, viewName, predicateData);
+                var rethinkQuery = self._constructTransformedRethinkQuery(ModelClass, query.type, viewName, predicateData);
 
                 rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
                   if (err) {
@@ -249,7 +240,7 @@ SCCRUDRethink.prototype.read = function (query, callback) {
     if (query.id) {
       ModelClass.get(query.id).run(loadedHandler);
     } else {
-      var rethinkQuery = self._constructOrderedFilteredRethinkQuery(ModelClass, query.type, query.view, query.predicateData);
+      var rethinkQuery = self._constructTransformedRethinkQuery(ModelClass, query.type, query.view, query.predicateData);
 
       var tasks = [];
 
