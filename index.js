@@ -1,7 +1,8 @@
 var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
-var authorization = require('./authorization');
+var AccessControl = require('./access-control');
+var jsonStableStringify = require('json-stable-stringify');
 
 var SCCRUDRethink = function (worker, options) {
   var self = this;
@@ -25,7 +26,7 @@ var SCCRUDRethink = function (worker, options) {
     self.models[modelName] = self.thinky.createModel(modelName, modelSchema.fields);
   });
 
-  this.authorization = authorization.attach(this.scServer, this.options);
+  this.accessControl = new AccessControl(this.scServer, this.thinky, this.options);
 
   this.scServer.on('_handshake', function (socket) {
     self._attachSocket(socket);
@@ -147,11 +148,21 @@ SCCRUDRethink.prototype._formatErrorResponse = function (err) {
 
 
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData, type) {
-  return this.channelPrefix + viewName + '(' + JSON.stringify(predicateData) + '):' + type;
+  var predicateDataString;
+  if (predicateData == null) {
+    predicateDataString = '';
+  } else {
+    predicateDataString = jsonStableStringify(predicateData);
+  }
+  return this.channelPrefix + viewName + '(' + predicateDataString + '):' + type;
 };
 
-SCCRUDRethink.prototype.create = function (query, callback) {
+SCCRUDRethink.prototype.create = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var ModelClass = this.models[query.type];
 
@@ -160,7 +171,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
       callback && callback(self._formatErrorResponse(err));
     } else {
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'create',
           id: result.id
         });
@@ -169,7 +180,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
           if (!err) {
             _.forOwn(viewOffsets, function (offsetData, viewName) {
               if (self._isWithinRealtimeBounds(offsetData.offset)) {
-                self.scServer.global.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+                self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
                   type: 'create',
                   id: result.id,
                   offset: offsetData.offset
@@ -193,8 +204,12 @@ SCCRUDRethink.prototype.create = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.read = function (query, callback) {
+SCCRUDRethink.prototype.read = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var pageSize = query.pageSize || this.options.defaultPageSize;
 
@@ -299,13 +314,17 @@ SCCRUDRethink.prototype._getDiffMap = function (change) {
   return diffs;
 };
 
-SCCRUDRethink.prototype.update = function (query, callback) {
+SCCRUDRethink.prototype.update = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
       if (query.field) {
-        self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'update',
           value: query.value
         });
@@ -313,7 +332,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
         var diffMap = self._getDiffMap(queryResult.changes[0]);
 
         _.forOwn(diffMap, function (value, field) {
-          self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'update',
             value: value
           });
@@ -321,7 +340,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
       }
 
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'update',
           id: query.id
         });
@@ -334,7 +353,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
               if (oldOffsetData.offset != newOffsetData.offset) {
                 if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                  self.scServer.global.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
+                  self.scServer.exchange.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'old',
                     id: query.id,
@@ -342,7 +361,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
                   });
                 }
                 if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.scServer.global.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
+                  self.scServer.exchange.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'new',
                     id: query.id,
@@ -357,7 +376,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
     }
     callback && callback(self._formatErrorResponse(err));
   };
-
+  // TODO: Send back Error objects instead of strings
   var ModelClass = this.models[query.type];
   if (ModelClass == null) {
     savedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
@@ -429,13 +448,17 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.delete = function (query, callback) {
+SCCRUDRethink.prototype.delete = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var deletedHandler = function (err, viewOffsets, result) {
     if (!err) {
       if (query.field) {
-        self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'delete'
         });
       } else {
@@ -443,21 +466,21 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
         var oldValue = change.old_val;
 
         _.forOwn(oldValue, function (value, field) {
-          self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'delete'
           });
         });
       }
 
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'delete',
           id: query.id
         });
       } else {
         _.forOwn(viewOffsets, function (offsetData, viewName) {
           if (self._isWithinRealtimeBounds(offsetData.offset)) {
-            self.scServer.global.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+            self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
               type: 'delete',
               id: query.id,
               offset: offsetData.offset
@@ -514,10 +537,10 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
 };
 
 SCCRUDRethink.prototype._attachSocket = function (socket) {
-  socket.on('create', this.create.bind(this));
-  socket.on('read', this.read.bind(this));
-  socket.on('update', this.update.bind(this));
-  socket.on('delete', this.delete.bind(this));
+  socket.on('create', this.create.bind(this, socket));
+  socket.on('read', this.read.bind(this, socket));
+  socket.on('update', this.update.bind(this, socket));
+  socket.on('delete', this.delete.bind(this, socket));
 };
 
 module.exports.thinky = thinky;
