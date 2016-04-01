@@ -1,7 +1,7 @@
 var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
-var authorization = require('./authorization');
+var AccessControl = require('./access-control');
 
 var SCCRUDRethink = function (worker, options) {
   var self = this;
@@ -25,7 +25,7 @@ var SCCRUDRethink = function (worker, options) {
     self.models[modelName] = self.thinky.createModel(modelName, modelSchema.fields);
   });
 
-  this.authorization = authorization.attach(this.scServer, this.options);
+  this.accessControl = new AccessControl(this.scServer, this.thinky, this.options);
 
   this.scServer.on('_handshake', function (socket) {
     self._attachSocket(socket);
@@ -150,8 +150,12 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData,
   return this.channelPrefix + viewName + '(' + JSON.stringify(predicateData) + '):' + type;
 };
 
-SCCRUDRethink.prototype.create = function (query, callback) {
+SCCRUDRethink.prototype.create = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var ModelClass = this.models[query.type];
 
@@ -193,47 +197,68 @@ SCCRUDRethink.prototype.create = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.read = function (query, callback) {
+SCCRUDRethink.prototype.read = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var pageSize = query.pageSize || this.options.defaultPageSize;
 
   var loadedHandler = function (err, data, count) {
+    var readResponse = {
+      r: self.thinky.r,
+      socket: socket,
+      action: 'read',
+      authToken: socket.getAuthToken(),
+      query: query,
+      resource: data
+    };
     if (err) {
-      callback && callback(self._formatErrorResponse(err));
-    } else {
-      var result;
-      if (query.id) {
-        if (query.field) {
-          if (data == null) {
-            data = {};
-          }
-          result = data[query.field];
-        } else {
-          result = data;
-        }
+      readResponse.error = err;
+    }
+    self.accessControl.filterOutboundRead(readResponse, function (crudBlockedError) {
+      if (crudBlockedError) {
+        callback && callback(crudBlockedError);
       } else {
-        var documentList = [];
-        var resultCount = Math.min(data.length, pageSize);
+        if (err) {
+          callback && callback(self._formatErrorResponse(err));
+        } else {
+          var result;
+          if (query.id) {
+            if (query.field) {
+              if (data == null) {
+                data = {};
+              }
+              result = data[query.field];
+            } else {
+              result = data;
+            }
+          } else {
+            var documentList = [];
+            var resultCount = Math.min(data.length, pageSize);
 
-        for (var i = 0; i < resultCount; i++) {
-          documentList.push(data[i].id || null);
-        }
-        result = {
-          data: documentList
-        };
+            for (var i = 0; i < resultCount; i++) {
+              documentList.push(data[i].id || null);
+            }
+            result = {
+              data: documentList
+            };
 
-        if (query.getCount) {
-          result.count = count;
-        }
+            if (query.getCount) {
+              result.count = count;
+            }
 
-        if (data.length < pageSize + 1) {
-          result.isLastPage = true;
+            if (data.length < pageSize + 1) {
+              result.isLastPage = true;
+            }
+          }
+
+          callback && callback(null, result);
         }
       }
-
-      callback && callback(null, result);
-    }
+    });
   };
 
   var ModelClass = self.models[query.type];
@@ -299,8 +324,12 @@ SCCRUDRethink.prototype._getDiffMap = function (change) {
   return diffs;
 };
 
-SCCRUDRethink.prototype.update = function (query, callback) {
+SCCRUDRethink.prototype.update = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
@@ -357,7 +386,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
     }
     callback && callback(self._formatErrorResponse(err));
   };
-
+  // TODO: Send back Error objects instead of strings
   var ModelClass = this.models[query.type];
   if (ModelClass == null) {
     savedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
@@ -429,8 +458,12 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.delete = function (query, callback) {
+SCCRUDRethink.prototype.delete = function (socket, query, callback) {
   var self = this;
+
+  if (!query) {
+    query = {};
+  }
 
   var deletedHandler = function (err, viewOffsets, result) {
     if (!err) {
@@ -514,10 +547,10 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
 };
 
 SCCRUDRethink.prototype._attachSocket = function (socket) {
-  socket.on('create', this.create.bind(this));
-  socket.on('read', this.read.bind(this));
-  socket.on('update', this.update.bind(this));
-  socket.on('delete', this.delete.bind(this));
+  socket.on('create', this.create.bind(this, socket));
+  socket.on('read', this.read.bind(this, socket));
+  socket.on('update', this.update.bind(this, socket));
+  socket.on('delete', this.delete.bind(this, socket));
 };
 
 module.exports.thinky = thinky;
