@@ -1,6 +1,7 @@
 var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
+var authorization = require('./authorization');
 
 var SCCRUDRethink = function (worker, options) {
   var self = this;
@@ -23,6 +24,8 @@ var SCCRUDRethink = function (worker, options) {
     var modelSchema = self.schema[modelName];
     self.models[modelName] = self.thinky.createModel(modelName, modelSchema.fields);
   });
+
+  this.authorization = authorization.attach(this.scServer, this.options);
 
   this.scServer.on('_handshake', function (socket) {
     self._attachSocket(socket);
