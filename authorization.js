@@ -7,19 +7,19 @@ module.exports.attach = function (scServer, options) {
   this.options = options || {};
   this.schema = this.options.schema || {};
 
-  var getModelAccessRightsFilter = function (type, action) {
+  var getModelAccessRightsFilter = function (type) {
     var modelSchema = self.schema[type];
     if (!modelSchema) {
       return null;
     }
-    var modelAuthorization = modelSchema.authorizations;
+    var modelAuthorization = modelSchema.accessControl;
     if (!modelAuthorization) {
       return null;
     }
-    return modelAuthorization[action];
+    return modelAuthorization.inbound || null;
   };
 
-  var getModelViewAccessRightsFilter = function (type, view, action) {
+  var getModelViewAccessRightsFilter = function (type, view) {
     var modelSchema = self.schema[type];
     if (!modelSchema) {
       return null;
@@ -32,18 +32,18 @@ module.exports.attach = function (scServer, options) {
     if (!viewSchema) {
       return null;
     }
-    var viewAuthorization = viewSchema.authorizations;
+    var viewAuthorization = viewSchema.accessControl;
     if (!viewAuthorization) {
       return null;
     }
-    return viewAuthorization[action];
+    return viewAuthorization.inbound || null;
   };
 
-  var getAccessRightsFilter = function (type, resource, action) {
+  var getAccessRightsFilter = function (type, resource) {
     if (resource.view) {
-      return getModelViewAccessRightsFilter(type, resource.view, action);
+      return getModelViewAccessRightsFilter(type, resource.view);
     } else {
-      return getModelAccessRightsFilter(type, action);
+      return getModelAccessRightsFilter(type);
     }
   };
 
@@ -52,9 +52,9 @@ module.exports.attach = function (scServer, options) {
       // If socket has a valid auth token, then allow emitting get or set events
       var authToken = req.socket.getAuthToken();
 
-      var accessFilter = getAccessRightsFilter(req.data.type, req.data, req.event);
+      var accessFilter = getModelAccessRightsFilter(req.data.type, req.data);
       if (accessFilter) {
-        accessFilter(req.socket, scServer.thinky.r, authToken, req.data, function (isAllowed) {
+        accessFilter(req.event, req.socket, scServer.thinky.r, authToken, req.data, function (isAllowed) {
           if (isAllowed) {
             next();
           } else {
@@ -118,33 +118,12 @@ module.exports.attach = function (scServer, options) {
   scServer.addMiddleware(scServer.MIDDLEWARE_PUBLISH_IN, function (req, next) {
     var authToken = req.socket.getAuthToken();
     var channelResource = getChannelResource(req.channel);
-    if (!channelResource) {
-      next();
-      return;
-    }
-    var accessFilter = getAccessRightsFilter(channelResource.type, channelResource, 'publish');
-    if (accessFilter) {
-      if (req.allowAccess) {
-        next();
-      } else {
-        accessFilter(req.socket, scServer.thinky.r, authToken, channelResource, function (isAllowed) {
-          if (isAllowed) {
-            next();
-          } else {
-            var crudBlockedError = new Error('Cannot publish to ' + req.channel + ' channel - Params: ' + JSON.stringify(req.data));
-            crudBlockedError.name = 'CRUDBlockedError';
-            next(crudBlockedError);
-          }
-        });
-      }
+    if (channelResource) {
+      var crudPublishNotAllowedError = new Error('Cannot publish to a CRUD resource channel');
+      crudPublishNotAllowedError.name = 'CRUDPublishNotAllowedError';
+      next(crudPublishNotAllowedError);
     } else {
-      if (self.options.blockAccessByDefault) {
-        var crudBlockedError = new Error('Cannot publish to ' + req.channel + ' channel - Params: ' + JSON.stringify(req.data) + ' - No access control rules found');
-        crudBlockedError.name = 'CRUDBlockedError';
-        next(crudBlockedError);
-      } else {
-        next();
-      }
+      next();
     }
   });
 
@@ -155,12 +134,12 @@ module.exports.attach = function (scServer, options) {
       next();
       return;
     }
-    var accessFilter = getAccessRightsFilter(channelResource.type, channelResource, 'subscribe');
+    var accessFilter = getModelAccessRightsFilter(channelResource.type, channelResource);
     if (accessFilter) {
       if (req.allowAccess) {
         next();
       } else {
-        accessFilter(req.socket, scServer.thinky.r, authToken, channelResource, function (isAllowed) {
+        accessFilter('subscribe', req.socket, scServer.thinky.r, authToken, channelResource, function (isAllowed) {
           if (isAllowed) {
             next();
           } else {

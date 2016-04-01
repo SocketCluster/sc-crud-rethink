@@ -160,7 +160,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
       callback && callback(self._formatErrorResponse(err));
     } else {
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'create',
           id: result.id
         });
@@ -169,7 +169,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
           if (!err) {
             _.forOwn(viewOffsets, function (offsetData, viewName) {
               if (self._isWithinRealtimeBounds(offsetData.offset)) {
-                self.scServer.global.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+                self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
                   type: 'create',
                   id: result.id,
                   offset: offsetData.offset
@@ -305,7 +305,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
       if (query.field) {
-        self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'update',
           value: query.value
         });
@@ -313,7 +313,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
         var diffMap = self._getDiffMap(queryResult.changes[0]);
 
         _.forOwn(diffMap, function (value, field) {
-          self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'update',
             value: value
           });
@@ -321,7 +321,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
       }
 
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'update',
           id: query.id
         });
@@ -334,7 +334,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
               if (oldOffsetData.offset != newOffsetData.offset) {
                 if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                  self.scServer.global.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
+                  self.scServer.exchange.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'old',
                     id: query.id,
@@ -342,7 +342,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
                   });
                 }
                 if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.scServer.global.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
+                  self.scServer.exchange.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'new',
                     id: query.id,
@@ -435,7 +435,7 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
   var deletedHandler = function (err, viewOffsets, result) {
     if (!err) {
       if (query.field) {
-        self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'delete'
         });
       } else {
@@ -443,21 +443,21 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
         var oldValue = change.old_val;
 
         _.forOwn(oldValue, function (value, field) {
-          self.scServer.global.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'delete'
           });
         });
       }
 
       if (query.optimization == null) {
-        self.scServer.global.publish(self.channelPrefix + query.type, {
+        self.scServer.exchange.publish(self.channelPrefix + query.type, {
           type: 'delete',
           id: query.id
         });
       } else {
         _.forOwn(viewOffsets, function (offsetData, viewName) {
           if (self._isWithinRealtimeBounds(offsetData.offset)) {
-            self.scServer.global.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+            self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
               type: 'delete',
               id: query.id,
               offset: offsetData.offset
