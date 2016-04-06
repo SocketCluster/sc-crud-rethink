@@ -107,8 +107,10 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
             });
           } else {
             tasks.push(function (cb) {
-              cb('Optimization failure - The length of the predicate data array for the view ' + viewName +
+              var error = new Error('Optimization failure - The length of the predicate data array for the view ' + viewName +
                 ' exceeded the maxPredicateDataCount of ' + self.maxPredicateDataCount);
+              error.name = 'CRUDOptimizationError';
+              cb(error);
             });
           }
         }
@@ -133,20 +135,6 @@ SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
   return this.options.maximumRealtimeOffset == null || offset <= this.options.maximumRealtimeOffset;
 };
 
-SCCRUDRethink.prototype._formatErrorResponse = function (err) {
-  if (err == null) {
-    return err;
-  }
-  if (err.message) {
-    return err.message;
-  }
-  if (typeof err == 'string') {
-    return err;
-  }
-  return JSON.stringify(err);
-};
-
-
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData, type) {
   var predicateDataString;
   if (predicateData == null) {
@@ -157,7 +145,7 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData,
   return this.channelPrefix + viewName + '(' + predicateDataString + '):' + type;
 };
 
-SCCRUDRethink.prototype.create = function (socket, query, callback) {
+SCCRUDRethink.prototype.create = function (query, callback) {
   var self = this;
 
   if (!query) {
@@ -168,7 +156,7 @@ SCCRUDRethink.prototype.create = function (socket, query, callback) {
 
   var savedHandler = function (err, result) {
     if (err) {
-      callback && callback(self._formatErrorResponse(err));
+      callback && callback(err);
     } else {
       if (query.optimization == null) {
         self.scServer.exchange.publish(self.channelPrefix + query.type, {
@@ -195,16 +183,20 @@ SCCRUDRethink.prototype.create = function (socket, query, callback) {
   };
 
   if (ModelClass == null) {
-    savedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    error.name = 'CRUDInvalidModelType';
+    savedHandler(error);
   } if (typeof query.value == 'object') {
     var instance = new ModelClass(query.value);
     instance.save(savedHandler);
   } else {
-    savedHandler('Cannot create a document from a primitive - Must be an object');
+    var error = new Error('Cannot create a document from a primitive - Must be an object');
+    error.name = 'CRUDInvalidParams';
+    savedHandler(error);
   }
 };
 
-SCCRUDRethink.prototype.read = function (socket, query, callback) {
+SCCRUDRethink.prototype.read = function (query, callback) {
   var self = this;
 
   if (!query) {
@@ -215,7 +207,7 @@ SCCRUDRethink.prototype.read = function (socket, query, callback) {
 
   var loadedHandler = function (err, data, count) {
     if (err) {
-      callback && callback(self._formatErrorResponse(err));
+      callback && callback(err);
     } else {
       var result;
       if (query.id) {
@@ -253,7 +245,9 @@ SCCRUDRethink.prototype.read = function (socket, query, callback) {
 
   var ModelClass = self.models[query.type];
   if (ModelClass == null) {
-    loadedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    error.name = 'CRUDInvalidModelType';
+    loadedHandler(error);
   } else {
     if (query.id) {
       ModelClass.get(query.id).run(loadedHandler);
@@ -314,7 +308,7 @@ SCCRUDRethink.prototype._getDiffMap = function (change) {
   return diffs;
 };
 
-SCCRUDRethink.prototype.update = function (socket, query, callback) {
+SCCRUDRethink.prototype.update = function (query, callback) {
   var self = this;
 
   if (!query) {
@@ -374,20 +368,26 @@ SCCRUDRethink.prototype.update = function (socket, query, callback) {
         });
       }
     }
-    callback && callback(self._formatErrorResponse(err));
+    callback && callback(err);
   };
-  // TODO: Send back Error objects instead of strings
+
   var ModelClass = this.models[query.type];
   if (ModelClass == null) {
-    savedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    error.name = 'CRUDInvalidModelType';
+    savedHandler(error);
   } else if (query.id == null) {
-    savedHandler('Cannot update document without specifying an id');
+    var error = new Error('Cannot update document without specifying an id');
+    error.name = 'CRUDInvalidParams';
+    savedHandler(error);
   } else {
     var tasks = [];
 
     if (query.field) {
       if (query.field == 'id') {
-        savedHandler('Cannot modify the id field of an existing document');
+        var error = new Error('Cannot modify the id field of an existing document');
+        error.name = 'CRUDInvalidOperation';
+        savedHandler(error);
       } else {
         if (query.optimization != null) {
           tasks.push(function (cb) {
@@ -429,7 +429,9 @@ SCCRUDRethink.prototype.update = function (socket, query, callback) {
           }
         });
       } else {
-        savedHandler('Cannot replace document with a primitive - Must be an object');
+        var error = new Error('Cannot replace document with a primitive - Must be an object');
+        error.name = 'CRUDInvalidOperation';
+        savedHandler(error);
       }
     }
     if (tasks.length) {
@@ -448,7 +450,7 @@ SCCRUDRethink.prototype.update = function (socket, query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.delete = function (socket, query, callback) {
+SCCRUDRethink.prototype.delete = function (query, callback) {
   var self = this;
 
   if (!query) {
@@ -494,12 +496,16 @@ SCCRUDRethink.prototype.delete = function (socket, query, callback) {
 
   var ModelClass = this.models[query.type];
   if (ModelClass == null) {
-    deletedHandler('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    error.name = 'CRUDInvalidModelType';
+    deletedHandler(error);
   } else {
     var tasks = [];
 
     if (query.id == null) {
-      deletedHandler('Cannot delete an entire collection - ID must be provided');
+      var error = new Error('Cannot delete an entire collection - ID must be provided');
+      error.name = 'CRUDInvalidParams';
+      deletedHandler(error);
     } else {
       if (query.optimization != null) {
         tasks.push(function (cb) {
@@ -537,10 +543,10 @@ SCCRUDRethink.prototype.delete = function (socket, query, callback) {
 };
 
 SCCRUDRethink.prototype._attachSocket = function (socket) {
-  socket.on('create', this.create.bind(this, socket));
-  socket.on('read', this.read.bind(this, socket));
-  socket.on('update', this.update.bind(this, socket));
-  socket.on('delete', this.delete.bind(this, socket));
+  socket.on('create', this.create.bind(this));
+  socket.on('read', this.read.bind(this));
+  socket.on('update', this.update.bind(this));
+  socket.on('delete', this.delete.bind(this));
 };
 
 module.exports.thinky = thinky;
