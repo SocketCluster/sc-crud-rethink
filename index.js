@@ -285,29 +285,6 @@ SCCRUDRethink.prototype.read = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype._getDiffMap = function (change) {
-  if (change == null) {
-    return {};
-  }
-
-  var diffs = {};
-
-  var oldObject = change.old_val;
-  var newObject = change.new_val;
-
-  _.forOwn(oldObject, function (value, key) {
-    if (!newObject.hasOwnProperty(key)) {
-      diffs[key] = null;
-    }
-  });
-  _.forOwn(newObject, function (value, key) {
-    if (newObject[key] != oldObject[key]) {
-      diffs[key] = value;
-    }
-  });
-  return diffs;
-};
-
 SCCRUDRethink.prototype.update = function (query, callback) {
   var self = this;
 
@@ -323,9 +300,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
           value: query.value
         });
       } else {
-        var diffMap = self._getDiffMap(queryResult.changes[0]);
-
-        _.forOwn(diffMap, function (value, field) {
+        _.forOwn(query.value, function (value, field) {
           self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'update',
             value: value
@@ -425,7 +400,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
           if (error) {
             savedHandler(error);
           } else {
-            self.thinky.r.table(query.type).get(query.id).replace(query.value, {returnChanges: true}).run(cb);
+            self.thinky.r.table(query.type).get(query.id).update(query.value, {returnChanges: true}).run(cb);
           }
         });
       } else {
