@@ -114,28 +114,24 @@ var AccessControl = function (scServer, thinky, options) {
     }
     var accessFilter = self._getModelAccessRightsFilter(channelResourceQuery.type);
     if (accessFilter) {
-      if (req.allowCrudAccess) {
-        next();
-      } else {
-        var subscribeRequest = {
-          r: self.thinky.r,
-          socket: req.socket,
-          action: 'subscribe',
-          authToken: authToken,
-          query: channelResourceQuery
-        };
-        accessFilter(subscribeRequest, function (err) {
-          if (err) {
-            if (typeof err == 'boolean') {
-              err = new Error('Cannot subscribe to ' + req.channel + ' channel');
-              err.name = 'CRUDBlockedError';
-            }
-            next(err);
-          } else {
-            next();
+      var subscribeRequest = {
+        r: self.thinky.r,
+        socket: req.socket,
+        action: 'subscribe',
+        authToken: authToken,
+        query: channelResourceQuery
+      };
+      accessFilter(subscribeRequest, function (err) {
+        if (err) {
+          if (typeof err == 'boolean') {
+            err = new Error('Cannot subscribe to ' + req.channel + ' channel');
+            err.name = 'CRUDBlockedError';
           }
-        });
-      }
+          next(err);
+        } else {
+          next();
+        }
+      });
     } else {
       if (self.options.blockInboundByDefault) {
         var crudBlockedError = new Error('Cannot subscribe to ' + req.channel + ' channel - No access control rules found');
