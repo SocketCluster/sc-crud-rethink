@@ -383,6 +383,8 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
         tasks.push(function (cb) {
           ModelClass.get(query.id).run().then(function (instance) {
+            // TODO: Allow running a post-read update access control middleware here
+            // Will need to do the same for delete operation
             instance[query.field] = query.value;
             instance.save(cb);
           }).error(cb);
@@ -390,9 +392,6 @@ SCCRUDRethink.prototype.update = function (query, callback) {
       }
     } else {
       if (typeof query.value == 'object') {
-        if (query.value.id == null) {
-          query.value.id = query.id;
-        }
         if (query.optimization != null) {
           tasks.push(function (cb) {
             self._getDocumentViewOffsets(query.id, query, cb);
@@ -400,19 +399,14 @@ SCCRUDRethink.prototype.update = function (query, callback) {
         }
 
         tasks.push(function (cb) {
-          // Replace the whole document
-          var error;
-          try {
-            var instance = new ModelClass(query.value);
-            instance.validate();
-          } catch (e) {
-            error = e;
-          }
-          if (error) {
-            savedHandler(error);
-          } else {
-            self.thinky.r.table(query.type).get(query.id).update(query.value, {returnChanges: true}).run(cb);
-          }
+          ModelClass.get(query.id).run().then(function (instance) {
+            // TODO: Allow running a post-read update access control middleware here
+            // Will need to do the same for delete operation
+            _.forOwn(query.value, function (value, field) {
+              instance[field] = value;
+            });
+            instance.save(cb);
+          }).error(cb);
         });
       } else {
         var error = new Error('Cannot replace document with a primitive - Must be an object');
