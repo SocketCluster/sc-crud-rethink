@@ -238,7 +238,11 @@ SCCRUDRethink.prototype.read = function (query, callback) {
           result.isLastPage = true;
         }
       }
-
+      // Return null instead of undefined - That way the frontend will know
+      // that the value was read but didn't exist (or was null).
+      if (result === undefined) {
+        result = null;
+      }
       callback && callback(null, result);
     }
   };
@@ -295,12 +299,19 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
       if (query.field) {
+        var cleanValue = query.value;
+        if (cleanValue === undefined) {
+          cleanValue = null;
+        }
         self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'update',
-          value: query.value
+          value: cleanValue
         });
       } else {
         _.forOwn(query.value, function (value, field) {
+          if (value === undefined) {
+            value = null;
+          }
           self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'update',
             value: value
