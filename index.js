@@ -1,8 +1,9 @@
 var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
-var AccessControl = require('./access-control');
+var Filter = require('./filter');
 var jsonStableStringify = require('json-stable-stringify');
+var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
 
 var SCCRUDRethink = function (worker, options) {
   var self = this;
@@ -13,6 +14,7 @@ var SCCRUDRethink = function (worker, options) {
 
   this.schema = this.options.schema || {};
   this.thinky = thinky(this.options.thinkyOptions);
+  this.options.thinky = this.thinky;
 
   this.maxPredicateDataCount = this.options.maxPredicateDataCount || 100;
   this.channelPrefix = 'crud>';
@@ -25,8 +27,9 @@ var SCCRUDRethink = function (worker, options) {
     var modelSchema = self.schema[modelName];
     self.models[modelName] = self.thinky.createModel(modelName, modelSchema.fields);
   });
+  this.options.models = this.models;
 
-  this.accessControl = new AccessControl(this.scServer, this.thinky, this.options);
+  this.filter = new Filter(this.scServer, this.options);
 
   this.scServer.on('_handshake', function (socket) {
     self._attachSocket(socket);
@@ -39,41 +42,11 @@ SCCRUDRethink.prototype._isValidView = function (type, viewName) {
   return modelViews.hasOwnProperty(viewName);
 };
 
-SCCRUDRethink.prototype._getViewMetaData = function (type, viewName) {
-  var typeSchema = this.schema[type] || {};
-  var modelViews = typeSchema.views || {};
-  var viewSchema = modelViews[viewName] || {};
-
-  return {
-    transform: viewSchema.transform
-  };
-};
-
-SCCRUDRethink.prototype._constructTransformedRethinkQuery = function (ModelClass, type, viewName, predicateData) {
-  var viewMetaData = this._getViewMetaData(type, viewName);
-  var rethinkQuery = ModelClass;
-
-  var sanitizedPredicateData;
-  if (predicateData == undefined) {
-    sanitizedPredicateData = null;
-  } else {
-    sanitizedPredicateData = predicateData;
-  }
-
-  var transformFn = viewMetaData.transform;
-  if (transformFn) {
-    rethinkQuery = transformFn(rethinkQuery, this.thinky.r, sanitizedPredicateData);
-  }
-
-  return rethinkQuery;
-};
-
 SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, callback) {
   var self = this;
   var ModelClass = this.models[query.type];
 
   if (ModelClass) {
-
     var tasks = [];
     var optimizationMap = query.optimization;
 
@@ -89,7 +62,7 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, c
           if (predicateDataList.length <= self.maxPredicateDataCount) {
             predicateDataList.forEach(function (predicateData) {
               tasks.push(function (cb) {
-                var rethinkQuery = self._constructTransformedRethinkQuery(ModelClass, query.type, viewName, predicateData);
+                var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, viewName, predicateData);
 
                 rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
                   if (err) {
@@ -145,7 +118,7 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData,
   return this.channelPrefix + viewName + '(' + predicateDataString + '):' + type;
 };
 
-SCCRUDRethink.prototype.create = function (query, callback) {
+SCCRUDRethink.prototype.create = function (query, callback, socket) {
   var self = this;
 
   if (!query) {
@@ -196,7 +169,7 @@ SCCRUDRethink.prototype.create = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.read = function (query, callback) {
+SCCRUDRethink.prototype.read = function (query, callback, socket) {
   var self = this;
 
   if (!query) {
@@ -209,41 +182,66 @@ SCCRUDRethink.prototype.read = function (query, callback) {
     if (err) {
       callback && callback(err);
     } else {
-      var result;
-      if (query.id) {
-        if (query.field) {
-          if (data == null) {
-            data = {};
-          }
-          result = data[query.field];
-        } else {
-          result = data;
-        }
+      // If socket does not exist, then the CRUD operation comes from the server-side
+      // and we don't need to pass it through a filter.
+      var applyPostFilter;
+      if (socket) {
+        applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
       } else {
-        var documentList = [];
-        var resultCount = Math.min(data.length, pageSize);
-
-        for (var i = 0; i < resultCount; i++) {
-          documentList.push(data[i].id || null);
-        }
-        result = {
-          data: documentList
+        applyPostFilter = function (req, next) {
+          next();
         };
-
-        if (query.getCount) {
-          result.count = count;
-        }
-
-        if (data.length < pageSize + 1) {
-          result.isLastPage = true;
-        }
       }
-      // Return null instead of undefined - That way the frontend will know
-      // that the value was read but didn't exist (or was null).
-      if (result === undefined) {
-        result = null;
-      }
-      callback && callback(null, result);
+      var filterRequest = {
+        r: self.thinky.r,
+        socket: socket,
+        action: 'read',
+        authToken: socket && socket.authToken,
+        query: query,
+        resource: data
+      };
+      applyPostFilter(filterRequest, function (err) {
+        if (err) {
+          callback && callback(err);
+        } else {
+          var result;
+          if (query.id) {
+            if (query.field) {
+              if (data == null) {
+                data = {};
+              }
+              result = data[query.field];
+            } else {
+              result = data;
+            }
+          } else {
+            var documentList = [];
+            var resultCount = Math.min(data.length, pageSize);
+
+            for (var i = 0; i < resultCount; i++) {
+              documentList.push(data[i].id || null);
+            }
+            result = {
+              data: documentList
+            };
+
+            if (query.getCount) {
+              result.count = count;
+            }
+
+            if (data.length < pageSize + 1) {
+              result.isLastPage = true;
+            }
+          }
+          // Return null instead of undefined - That way the frontend will know
+          // that the value was read but didn't exist (or was null).
+          if (result === undefined) {
+            result = null;
+          }
+
+          callback && callback(null, result);
+        }
+      });
     }
   };
 
@@ -256,7 +254,7 @@ SCCRUDRethink.prototype.read = function (query, callback) {
     if (query.id) {
       ModelClass.get(query.id).run(loadedHandler);
     } else {
-      var rethinkQuery = self._constructTransformedRethinkQuery(ModelClass, query.type, query.view, query.predicateData);
+      var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.predicateData);
 
       var tasks = [];
 
@@ -289,7 +287,7 @@ SCCRUDRethink.prototype.read = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.update = function (query, callback) {
+SCCRUDRethink.prototype.update = function (query, callback, socket) {
   var self = this;
 
   if (!query) {
@@ -369,6 +367,25 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   } else {
     var tasks = [];
 
+    // If socket does not exist, then the CRUD operation comes from the server-side
+    // and we don't need to pass it through a filter.
+    var applyPostFilter;
+    if (socket) {
+      applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
+    } else {
+      applyPostFilter = function (req, next) {
+        next();
+      };
+    }
+
+    var filterRequest = {
+      r: self.thinky.r,
+      socket: socket,
+      action: 'update',
+      authToken: socket && socket.authToken,
+      query: query
+    };
+
     if (query.field) {
       if (query.field == 'id') {
         var error = new Error('Cannot modify the id field of an existing document');
@@ -383,10 +400,15 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
         tasks.push(function (cb) {
           ModelClass.get(query.id).run().then(function (instance) {
-            // TODO: Allow running a post-read update access control middleware here
-            // Will need to do the same for delete operation
-            instance[query.field] = query.value;
-            instance.save(cb);
+            filterRequest.resource = instance;
+            applyPostFilter(filterRequest, function (err) {
+              if (err) {
+                cb(err);
+              } else {
+                instance[query.field] = query.value;
+                instance.save(cb);
+              }
+            });
           }).error(cb);
         });
       }
@@ -400,12 +422,17 @@ SCCRUDRethink.prototype.update = function (query, callback) {
 
         tasks.push(function (cb) {
           ModelClass.get(query.id).run().then(function (instance) {
-            // TODO: Allow running a post-read update access control middleware here
-            // Will need to do the same for delete operation
-            _.forOwn(query.value, function (value, field) {
-              instance[field] = value;
+            filterRequest.resource = instance;
+            applyPostFilter(filterRequest, function (err) {
+              if (err) {
+                cb(err);
+              } else {
+                _.forOwn(query.value, function (value, field) {
+                  instance[field] = value;
+                });
+                instance.save(cb);
+              }
             });
-            instance.save(cb);
           }).error(cb);
         });
       } else {
@@ -430,7 +457,7 @@ SCCRUDRethink.prototype.update = function (query, callback) {
   }
 };
 
-SCCRUDRethink.prototype.delete = function (query, callback) {
+SCCRUDRethink.prototype.delete = function (query, callback, socket) {
   var self = this;
 
   if (!query) {
@@ -444,10 +471,7 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
           type: 'delete'
         });
       } else {
-        var change = result.changes[0] || {};
-        var oldValue = change.old_val;
-
-        _.forOwn(oldValue, function (value, field) {
+        _.forOwn(result, function (value, field) {
           self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'delete'
           });
@@ -471,7 +495,7 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
         });
       }
     }
-    callback && callback(self._formatErrorResponse(err));
+    callback && callback(err);
   };
 
   var ModelClass = this.models[query.type];
@@ -493,15 +517,50 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
         });
       }
 
+      // If socket does not exist, then the CRUD operation comes from the server-side
+      // and we don't need to pass it through a filter.
+      var applyPostFilter;
+      if (socket) {
+        applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
+      } else {
+        applyPostFilter = function (req, next) {
+          next();
+        };
+      }
+
+      var filterRequest = {
+        r: self.thinky.r,
+        socket: socket,
+        action: 'delete',
+        authToken: socket && socket.authToken,
+        query: query
+      };
+
       if (query.field == null) {
         tasks.push(function (cb) {
-          ModelClass.get(query.id).delete({returnChanges: true}).run(cb);
+          ModelClass.get(query.id).run().then(function (instance) {
+            filterRequest.resource = instance;
+            applyPostFilter(filterRequest, function (err) {
+              if (err) {
+                cb(err);
+              } else {
+                instance.delete(cb);
+              }
+            });
+          }).error(cb);
         });
       } else {
         tasks.push(function (cb) {
           ModelClass.get(query.id).run().then(function (instance) {
-            delete instance[query.field];
-            instance.save(cb);
+            filterRequest.resource = instance;
+            applyPostFilter(filterRequest, function (err) {
+              if (err) {
+                cb(err);
+              } else {
+                delete instance[query.field];
+                instance.save(cb);
+              }
+            });
           }).error(cb);
         });
       }
@@ -523,10 +582,19 @@ SCCRUDRethink.prototype.delete = function (query, callback) {
 };
 
 SCCRUDRethink.prototype._attachSocket = function (socket) {
-  socket.on('create', this.create.bind(this));
-  socket.on('read', this.read.bind(this));
-  socket.on('update', this.update.bind(this));
-  socket.on('delete', this.delete.bind(this));
+  var self = this;
+  socket.on('create', function (query, callback) {
+    self.create(query, callback, socket);
+  });
+  socket.on('read', function (query, callback) {
+    self.read(query, callback, socket);
+  });
+  socket.on('update', function (query, callback) {
+    self.update(query, callback, socket);
+  });
+  socket.on('delete', function (query, callback) {
+    self.delete(query, callback, socket);
+  });
 };
 
 module.exports.thinky = thinky;
