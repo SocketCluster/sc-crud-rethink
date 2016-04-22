@@ -215,9 +215,9 @@ Filter.prototype.applyPostFilter = function (req, next) {
         // For collections.
         rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.predicateData);
         if (query.offset) {
-          rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize).pluck('id');
+          rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize);
         } else {
-          rethinkQuery = rethinkQuery.limit(pageSize).pluck('id');
+          rethinkQuery = rethinkQuery.limit(pageSize);
         }
       }
       rethinkQuery.run().then(function (resource) {
