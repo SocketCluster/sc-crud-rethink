@@ -220,9 +220,13 @@ Filter.prototype.applyPostFilter = function (req, next) {
           rethinkQuery = rethinkQuery.limit(pageSize);
         }
       }
-      rethinkQuery.run().then(function (resource) {
-        request.resource = resource;
-        continueWithPostFilter();
+      rethinkQuery.run(function (err, resource) {
+        if (err) {
+          next(err);
+        } else {
+          request.resource = resource;
+          continueWithPostFilter();
+        }
       });
     } else {
       continueWithPostFilter();
