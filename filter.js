@@ -7,7 +7,8 @@ var Filter = function (scServer, options) {
 
   this.options = options || {};
   this.schema = this.options.schema || {};
-  this.thinky = options.thinky;
+  this.thinky = this.options.thinky;
+  this.cache = this.options.cache;
 
   this._getModelFilter = function (modelType, filterPhase) {
     var modelSchema = self.schema[modelType];
@@ -206,28 +207,31 @@ Filter.prototype.applyPostFilter = function (req, next) {
         return;
       }
 
-      var rethinkQuery;
-
-      if (query.id) {
-        // For single documents.
-        rethinkQuery = ModelClass.get(query.id);
-      } else {
-        // For collections.
-        rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.predicateData);
-        if (query.offset) {
-          rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize);
-        } else {
-          rethinkQuery = rethinkQuery.limit(pageSize);
-        }
-      }
-      rethinkQuery.run(function (err, resource) {
+      var queryResponseHandler = function (err, resource) {
         if (err) {
           next(err);
         } else {
           request.resource = resource;
           continueWithPostFilter();
         }
-      });
+      };
+
+      if (query.id) {
+        var dataProvider = function (cb) {
+          ModelClass.get(query.id).run(cb);
+        };
+        this.cache.pass(query, dataProvider, queryResponseHandler);
+      } else {
+        // For collections.
+        var rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.predicateData);
+        if (query.offset) {
+          rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize);
+        } else {
+          rethinkQuery = rethinkQuery.limit(pageSize);
+        }
+        rethinkQuery.run(queryResponseHandler);
+      }
+
     } else {
       continueWithPostFilter();
     }

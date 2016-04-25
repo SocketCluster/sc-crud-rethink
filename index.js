@@ -2,6 +2,7 @@ var _ = require('lodash');
 var thinky = require('thinky');
 var async = require('async');
 var Filter = require('./filter');
+var Cache = require('./cache');
 var jsonStableStringify = require('json-stable-stringify');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
 
@@ -28,6 +29,13 @@ var SCCRUDRethink = function (worker, options) {
     self.models[modelName] = self.thinky.createModel(modelName, modelSchema.fields);
   });
   this.options.models = this.models;
+
+  this.cache = new Cache({
+    cacheDisabled: this.options.cacheDisabled,
+    brokerEngine: this.scServer.brokerEngine,
+    cacheDuration: this.options.cacheDuration
+  });
+  this.options.cache = this.cache;
 
   this.filter = new Filter(this.scServer, this.options);
 
@@ -252,7 +260,10 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
     loadedHandler(error);
   } else {
     if (query.id) {
-      ModelClass.get(query.id).run(loadedHandler);
+      var dataProvider = function (cb) {
+        ModelClass.get(query.id).run(cb);
+      };
+      self.cache.pass(query, dataProvider, loadedHandler);
     } else {
       var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.predicateData);
 
