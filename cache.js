@@ -42,9 +42,19 @@ Cache.prototype.set = function (query, entry, resourcePath) {
   this._cache[resourcePath] = entry;
 
   setTimeout(function () {
-    self.emit('expire', self._simplifyQuery(query), entry);
     delete self._cache[resourcePath];
+    self.emit('expire', self._simplifyQuery(query), entry);
   }, this.cacheDuration);
+};
+
+Cache.prototype.clear = function (query) {
+  var resourcePath = this._getResourcePath(query);
+
+  var entry = this._cache[resourcePath];
+  if (entry !== undefined) {
+    delete this._cache[resourcePath];
+    this.emit('clear', this._simplifyQuery(query), entry);
+  }
 };
 
 Cache.prototype.get = function (query, resourcePath) {

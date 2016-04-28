@@ -5,6 +5,7 @@ var Filter = require('./filter');
 var Cache = require('./cache');
 var jsonStableStringify = require('json-stable-stringify');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
+var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
 var SCCRUDRethink = function (worker, options) {
   var self = this;
@@ -42,6 +43,24 @@ var SCCRUDRethink = function (worker, options) {
   this.scServer.on('_handshake', function (socket) {
     self._attachSocket(socket);
   });
+
+  this.publish = this.scServer.exchange.publish.bind(this.scServer.exchange);
+
+  // Monkey-patch the exchange.publish method in order to automatically
+  // update the cache when a publish is made for a specific CRUD resource.
+  // from outside this module.
+  this.scServer.exchange.publish = function (channel, data, callback) {
+    if (channel && channel.indexOf && channel.indexOf('crud>') == 0) {
+      if (data == null) {
+        // If data is null, then we will clear the whole cache for that resource.
+        var resourceQuery = parseChannelResourceQuery(channel);
+        self.cache.clear(resourceQuery);
+      } else {
+        self.cache.update(channel, data);
+      }
+    }
+    self.publish.apply(self.scServer.exchange, arguments);
+  };
 };
 
 SCCRUDRethink.prototype._isValidView = function (type, viewName) {
@@ -140,7 +159,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
       callback && callback(err);
     } else {
       if (query.optimization == null) {
-        self.scServer.exchange.publish(self.channelPrefix + query.type, {
+        self.publish(self.channelPrefix + query.type, {
           type: 'create',
           id: result.id
         });
@@ -149,7 +168,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
           if (!err) {
             _.forOwn(viewOffsets, function (offsetData, viewName) {
               if (self._isWithinRealtimeBounds(offsetData.offset)) {
-                self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+                self.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
                   type: 'create',
                   id: result.id,
                   offset: offsetData.offset
@@ -312,7 +331,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         if (cleanValue === undefined) {
           cleanValue = null;
         }
-        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'update',
           value: cleanValue
         });
@@ -321,7 +340,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
           if (value === undefined) {
             value = null;
           }
-          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'update',
             value: value
           });
@@ -329,7 +348,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
       }
 
       if (query.optimization == null) {
-        self.scServer.exchange.publish(self.channelPrefix + query.type, {
+        self.publish(self.channelPrefix + query.type, {
           type: 'update',
           id: query.id
         });
@@ -342,7 +361,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
 
               if (oldOffsetData.offset != newOffsetData.offset) {
                 if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                  self.scServer.exchange.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
+                  self.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'old',
                     id: query.id,
@@ -350,7 +369,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
                   });
                 }
                 if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.scServer.exchange.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
+                  self.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
                     type: 'update',
                     freshness: 'new',
                     id: query.id,
@@ -478,26 +497,26 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
   var deletedHandler = function (err, viewOffsets, result) {
     if (!err) {
       if (query.field) {
-        self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
+        self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'delete'
         });
       } else {
         _.forOwn(result, function (value, field) {
-          self.scServer.exchange.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
+          self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'delete'
           });
         });
       }
 
       if (query.optimization == null) {
-        self.scServer.exchange.publish(self.channelPrefix + query.type, {
+        self.publish(self.channelPrefix + query.type, {
           type: 'delete',
           id: query.id
         });
       } else {
         _.forOwn(viewOffsets, function (offsetData, viewName) {
           if (self._isWithinRealtimeBounds(offsetData.offset)) {
-            self.scServer.exchange.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+            self.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
               type: 'delete',
               id: query.id,
               offset: offsetData.offset

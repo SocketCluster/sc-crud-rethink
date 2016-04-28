@@ -1,5 +1,6 @@
 var _ = require('lodash');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
+var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
 var Filter = function (scServer, options) {
   // Setup SocketCluster middleware for access control and filtering
@@ -64,45 +65,8 @@ var Filter = function (scServer, options) {
     }
   });
 
-  var channelViewPredicateRegex = /^([^\(]*)\((.*)\):([^:]*)$/;
-
-  var getChannelResourceQuery = function (channelName) {
-    var mainParts = channelName.split('>');
-    if (mainParts[0] == 'crud' && mainParts[1]) {
-      var resourceString = mainParts[1];
-
-      if (resourceString.indexOf(':') != -1) {
-        // If resource is a view.
-        var viewMatches = resourceString.match(channelViewPredicateRegex);
-        var viewResource = {
-          view: viewMatches[1],
-          type: viewMatches[3]
-        }
-        try {
-          viewResource.predicateData = JSON.parse(viewMatches[2]);
-        } catch (e) {}
-
-        return viewResource;
-      } else {
-        // If resource is a simple model.
-        var resourceParts = resourceString.split('/');
-        var modelResource = {
-          type: resourceParts[0]
-        };
-        if (resourceParts[1]) {
-          modelResource.id = resourceParts[1];
-        }
-        if (resourceParts[2]) {
-          modelResource.field = resourceParts[2];
-        }
-        return modelResource;
-      }
-    }
-    return null;
-  };
-
   scServer.addMiddleware(scServer.MIDDLEWARE_PUBLISH_IN, function (req, next) {
-    var channelResourceQuery = getChannelResourceQuery(req.channel);
+    var channelResourceQuery = parseChannelResourceQuery(req.channel);
     if (channelResourceQuery) {
       // Always block CRUD publish from outside clients.
       var crudPublishNotAllowedError = new Error('Cannot publish to a CRUD resource channel');
@@ -115,7 +79,7 @@ var Filter = function (scServer, options) {
 
   scServer.addMiddleware(scServer.MIDDLEWARE_SUBSCRIBE, function (req, next) {
     var authToken = req.socket.authToken;
-    var channelResourceQuery = getChannelResourceQuery(req.channel);
+    var channelResourceQuery = parseChannelResourceQuery(req.channel);
     if (!channelResourceQuery) {
       next();
       return;
