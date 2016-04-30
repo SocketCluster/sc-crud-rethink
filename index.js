@@ -7,13 +7,12 @@ var jsonStableStringify = require('json-stable-stringify');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
 var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
-var SCCRUDRethink = function (worker, options) {
+var SCCRUDRethink = function (options) {
   var self = this;
 
-  this.scServer = worker.scServer;
   this.options = options || {};
-  this.models = {};
 
+  this.models = {};
   this.schema = this.options.schema || {};
   this.thinky = thinky(this.options.thinkyOptions);
   this.options.thinky = this.thinky;
@@ -31,36 +30,58 @@ var SCCRUDRethink = function (worker, options) {
   });
   this.options.models = this.models;
 
+  var brokerEngine, cacheDisabled;
+  if (this.options.worker) {
+    this.scServer = this.options.worker.scServer;
+    brokerEngine = this.scServer.brokerEngine;
+    cacheDisabled = this.options.cacheDisabled || false;
+  } else {
+    this.scServer = null;
+    brokerEngine = null;
+    if (this.options.hasOwnProperty('cacheDisabled')) {
+      cacheDisabled = this.options.cacheDisabled || false;
+    } else {
+      // If worker is not defined and cacheDisabled isn't defined,
+      // then by default we will disable the cache.
+      cacheDisabled = true;
+    }
+  }
+
   this.cache = new Cache({
-    cacheDisabled: this.options.cacheDisabled,
-    brokerEngine: this.scServer.brokerEngine,
+    brokerEngine: brokerEngine,
+    cacheDisabled: cacheDisabled,
     cacheDuration: this.options.cacheDuration
   });
   this.options.cache = this.cache;
 
-  this.filter = new Filter(this.scServer, this.options);
+  if (this.scServer) {
+    this.filter = new Filter(this.scServer, this.options);
 
-  this.scServer.on('_handshake', function (socket) {
-    self._attachSocket(socket);
-  });
+    this.publish = this.scServer.exchange.publish.bind(this.scServer.exchange);
 
-  this.publish = this.scServer.exchange.publish.bind(this.scServer.exchange);
-
-  // Monkey-patch the exchange.publish method in order to automatically
-  // update the cache when a publish is made for a specific CRUD resource.
-  // from outside this module.
-  this.scServer.exchange.publish = function (channel, data, callback) {
-    if (channel && channel.indexOf && channel.indexOf('crud>') == 0) {
-      if (data == null) {
-        // If data is null, then we will clear the whole cache for that resource.
-        var resourceQuery = parseChannelResourceQuery(channel);
-        self.cache.clear(resourceQuery);
-      } else {
-        self.cache.update(channel, data);
+    // Monkey-patch the exchange.publish method in order to automatically
+    // update the cache when a publish is made for a specific CRUD resource.
+    // from outside this module.
+    this.scServer.exchange.publish = function (channel, data, callback) {
+      if (channel && channel.indexOf && channel.indexOf('crud>') == 0) {
+        if (data == null) {
+          // If data is null, then we will clear the whole cache for that resource.
+          var resourceQuery = parseChannelResourceQuery(channel);
+          self.cache.clear(resourceQuery);
+        } else {
+          self.cache.update(channel, data);
+        }
       }
-    }
-    self.publish.apply(self.scServer.exchange, arguments);
-  };
+      self.publish.apply(self.scServer.exchange, arguments);
+    };
+
+    this.scServer.on('_handshake', function (socket) {
+      self._attachSocket(socket);
+    });
+  } else {
+    // If no server is available, publish will be a no-op.
+    this.publish = function () {};
+  }
 };
 
 SCCRUDRethink.prototype._isValidView = function (type, viewName) {
@@ -212,7 +233,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       // If socket does not exist, then the CRUD operation comes from the server-side
       // and we don't need to pass it through a filter.
       var applyPostFilter;
-      if (socket) {
+      if (socket && self.filter) {
         applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
       } else {
         applyPostFilter = function (req, next) {
@@ -400,7 +421,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     // If socket does not exist, then the CRUD operation comes from the server-side
     // and we don't need to pass it through a filter.
     var applyPostFilter;
-    if (socket) {
+    if (socket && self.filter) {
       applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
     } else {
       applyPostFilter = function (req, next) {
@@ -550,7 +571,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
       // If socket does not exist, then the CRUD operation comes from the server-side
       // and we don't need to pass it through a filter.
       var applyPostFilter;
-      if (socket) {
+      if (socket && self.filter) {
         applyPostFilter = self.filter.applyPostFilter.bind(self.filter);
       } else {
         applyPostFilter = function (req, next) {
@@ -628,7 +649,13 @@ SCCRUDRethink.prototype._attachSocket = function (socket) {
 };
 
 module.exports.thinky = thinky;
+module.exports.SCCRUDRethink = SCCRUDRethink;
 
 module.exports.attach = function (worker, options) {
-  return new SCCRUDRethink(worker, options);
+  if (options) {
+    options.worker = worker;
+  } else {
+    options = {worker: worker};
+  }
+  return new SCCRUDRethink(options);
 };

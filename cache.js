@@ -10,7 +10,7 @@ var Cache = function (options) {
   this.brokerEngine = this.options.brokerEngine;
   this.cacheDisabled = !!this.options.cacheDisabled;
 
-  if (!this.cacheDisabled) {
+  if (!this.cacheDisabled && this.brokerEngine) {
     this.brokerEngine.on('message', function (message) {
       self.update(message.channel, message.data);
     });
