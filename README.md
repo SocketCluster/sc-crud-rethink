@@ -23,7 +23,3 @@ need to declare what fields are allowed and optionally the **views** which are s
 
 Simply put, a **view** is an ordered, filtered subset of all documents within a table. Views need to define a ```filter``` and/or ```order``` function
 which will be used to construct the view for table's data.
-
-As you can see here: https://github.com/SocketCluster/sc-sample-inventory/blob/master/worker.js#L58-L63 - The filter and order functions are responsible for
-creating predicates which will be used by RethinkDB to filter and order data. Both the filter and order functions accept optional predicateData as an argument.
-The client/frontend of your app is responsible for providing that predicate data. See https://github.com/SocketCluster/sc-collection for more info about predicate data.

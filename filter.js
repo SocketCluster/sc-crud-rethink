@@ -187,7 +187,7 @@ Filter.prototype.applyPostFilter = function (req, next) {
         this.cache.pass(query, dataProvider, queryResponseHandler);
       } else {
         // For collections.
-        var rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.predicateData);
+        var rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.viewParams);
         if (query.offset) {
           rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize);
         } else {

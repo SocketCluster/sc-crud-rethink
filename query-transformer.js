@@ -8,20 +8,20 @@ var getViewMetaData = function (options, type, viewName) {
   };
 };
 
-module.exports.constructTransformedRethinkQuery = function (options, ModelClass, type, viewName, predicateData) {
+module.exports.constructTransformedRethinkQuery = function (options, ModelClass, type, viewName, viewParams) {
   var viewMetaData = getViewMetaData(options, type, viewName);
   var rethinkQuery = ModelClass;
 
-  var sanitizedPredicateData;
-  if (predicateData == undefined) {
-    sanitizedPredicateData = null;
+  var sanitizedViewParams;
+  if (viewParams == undefined) {
+    sanitizedViewParams = null;
   } else {
-    sanitizedPredicateData = predicateData;
+    sanitizedViewParams = viewParams;
   }
 
   var transformFn = viewMetaData.transform;
   if (transformFn) {
-    rethinkQuery = transformFn(rethinkQuery, options.thinky.r, sanitizedPredicateData);
+    rethinkQuery = transformFn(rethinkQuery, options.thinky.r, sanitizedViewParams);
   }
 
   return rethinkQuery;

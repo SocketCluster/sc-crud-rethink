@@ -1,4 +1,4 @@
-var channelViewPredicateRegex = /^([^\(]*)\((.*)\):([^:]*)$/;
+var channelViewParamsRegex = /^([^\(]*)\((.*)\):([^:]*)$/;
 
 module.exports.parseChannelResourceQuery = function (channelName) {
   var mainParts = channelName.split('>');
@@ -7,13 +7,13 @@ module.exports.parseChannelResourceQuery = function (channelName) {
 
     if (resourceString.indexOf(':') != -1) {
       // If resource is a view.
-      var viewMatches = resourceString.match(channelViewPredicateRegex);
+      var viewMatches = resourceString.match(channelViewParamsRegex);
       var viewResource = {
         view: viewMatches[1],
         type: viewMatches[3]
       }
       try {
-        viewResource.predicateData = JSON.parse(viewMatches[2]);
+        viewResource.viewParams = JSON.parse(viewMatches[2]);
       } catch (e) {}
 
       return viewResource;

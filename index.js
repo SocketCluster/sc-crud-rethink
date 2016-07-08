@@ -17,7 +17,6 @@ var SCCRUDRethink = function (options) {
   this.thinky = thinky(this.options.thinkyOptions);
   this.options.thinky = this.thinky;
 
-  this.maxPredicateDataCount = this.options.maxPredicateDataCount || 100;
   this.channelPrefix = 'crud>';
 
   if (!this.options.defaultPageSize) {
@@ -84,71 +83,65 @@ var SCCRUDRethink = function (options) {
   }
 };
 
-SCCRUDRethink.prototype._isValidView = function (type, viewName) {
+SCCRUDRethink.prototype._getViews = function (type) {
   var typeSchema = this.schema[type] || {};
-  var modelViews = typeSchema.views || {};
+  return typeSchema.views || {};
+};
+
+SCCRUDRethink.prototype._isValidView = function (type, viewName) {
+  var modelViews = this._getViews(type);
   return modelViews.hasOwnProperty(viewName);
 };
 
-SCCRUDRethink.prototype._getDocumentViewOffsets = function (documentId, query, callback) {
+SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, callback) {
   var self = this;
   var ModelClass = this.models[query.type];
 
   if (ModelClass) {
     var tasks = [];
-    var optimizationMap = query.optimization;
 
-    if (optimizationMap == null) {
-      callback(null, {});
-    } else {
-      _.forOwn(optimizationMap, function (predicateDataList, viewName) {
-        if (self._isValidView(query.type, viewName)) {
-          if (!(predicateDataList instanceof Array)) {
-            predicateDataList = [predicateDataList];
-          }
+    var viewSchemaMap = this._getViews(query.type);
 
-          if (predicateDataList.length <= self.maxPredicateDataCount) {
-            predicateDataList.forEach(function (predicateData) {
-              tasks.push(function (cb) {
-                var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, viewName, predicateData);
+    _.forOwn(viewSchemaMap, function (viewSchema, viewName) {
+      var viewParams;
+      if (viewSchema.paramFields && viewSchema.paramFields.length) {
+        viewParams = {};
+        _.forEach(viewSchema.paramFields, function (fieldName) {
+          viewParams[fieldName] = document[fieldName];
+        });
+      } else {
+        viewParams = null;
+      }
 
-                rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(documentId)).execute(function (err, documentOffsets) {
-                  if (err) {
-                    cb(err);
-                  } else {
-                    cb(null, {
-                      view: viewName,
-                      id: documentId,
-                      predicateData: predicateData,
-                      offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
-                    });
-                  }
-                });
-              });
-            });
+      tasks.push(function (cb) {
+        var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, viewName, document);
+
+        rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(document.id)).execute(function (err, documentOffsets) {
+          if (err) {
+            cb(err);
           } else {
-            tasks.push(function (cb) {
-              var error = new Error('Optimization failure - The length of the predicate data array for the view ' + viewName +
-                ' exceeded the maxPredicateDataCount of ' + self.maxPredicateDataCount);
-              error.name = 'CRUDOptimizationError';
-              cb(error);
+            cb(null, {
+              view: viewName,
+              id: document.id,
+              viewParams: viewParams,
+              offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
             });
           }
-        }
+        });
       });
+    });
 
-      async.parallel(tasks, function (err, results) {
-        var viewOffetMap = {};
-        if (!err) {
-          results.forEach(function (viewOffset) {
-            if (viewOffset != null) {
-              viewOffetMap[viewOffset.view] = viewOffset;
-            }
-          });
-        }
-        callback(err, viewOffetMap);
-      });
-    }
+    async.parallel(tasks, function (err, results) {
+      var viewOffetMap = {};
+      if (!err) {
+        results.forEach(function (viewOffset) {
+          if (viewOffset != null) {
+            viewOffetMap[viewOffset.view] = viewOffset;
+          }
+        });
+      }
+      callback(err, viewOffetMap);
+    });
   }
 };
 
@@ -156,14 +149,14 @@ SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
   return this.options.maximumRealtimeOffset == null || offset <= this.options.maximumRealtimeOffset;
 };
 
-SCCRUDRethink.prototype._getViewChannelName = function (viewName, predicateData, type) {
-  var predicateDataString;
-  if (predicateData == null) {
-    predicateDataString = '';
+SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, type) {
+  var viewParamsString;
+  if (viewParams == null) {
+    viewParamsString = '';
   } else {
-    predicateDataString = jsonStableStringify(predicateData);
+    viewParamsString = jsonStableStringify(viewParams);
   }
-  return this.channelPrefix + viewName + '(' + predicateDataString + '):' + type;
+  return this.channelPrefix + viewName + '(' + viewParamsString + '):' + type;
 };
 
 SCCRUDRethink.prototype.create = function (query, callback, socket) {
@@ -179,26 +172,19 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
     if (err) {
       callback && callback(err);
     } else {
-      if (query.optimization == null) {
-        self.publish(self.channelPrefix + query.type, {
-          type: 'create',
-          id: result.id
-        });
-      } else {
-        self._getDocumentViewOffsets(result.id, query, function (err, viewOffsets) {
-          if (!err) {
-            _.forOwn(viewOffsets, function (offsetData, viewName) {
-              if (self._isWithinRealtimeBounds(offsetData.offset)) {
-                self.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
-                  type: 'create',
-                  id: result.id,
-                  offset: offsetData.offset
-                });
-              }
-            });
-          }
-        });
-      }
+      self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
+        if (!err) {
+          _.forOwn(viewOffsets, function (offsetData, viewName) {
+            if (self._isWithinRealtimeBounds(offsetData.offset)) {
+              self.publish(self._getViewChannelName(viewName, offsetData.viewParams, query.type), {
+                type: 'create',
+                id: result.id,
+                offset: offsetData.offset
+              });
+            }
+          });
+        }
+      });
       callback && callback(err, result.id);
     }
   };
@@ -305,7 +291,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       };
       self.cache.pass(query, dataProvider, loadedHandler);
     } else {
-      var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.predicateData);
+      var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.viewParams);
 
       var tasks = [];
 
@@ -368,40 +354,33 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
 
-      if (query.optimization == null) {
-        self.publish(self.channelPrefix + query.type, {
-          type: 'update',
-          id: query.id
-        });
-      } else {
-        self._getDocumentViewOffsets(query.id, query, function (err, newViewOffsets) {
-          if (!err) {
-            _.forOwn(newViewOffsets, function (newOffsetData, viewName) {
-              var oldOffsetData = oldViewOffsets[viewName] || {};
-              newOffsetData = newOffsetData || {};
+      self._getDocumentViewOffsets(queryResult, query, function (err, newViewOffsets) {
+        if (!err) {
+          _.forOwn(newViewOffsets, function (newOffsetData, viewName) {
+            var oldOffsetData = oldViewOffsets[viewName] || {};
+            newOffsetData = newOffsetData || {};
 
-              if (oldOffsetData.offset != newOffsetData.offset) {
-                if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                  self.publish(self._getViewChannelName(viewName, oldOffsetData.predicateData, query.type), {
-                    type: 'update',
-                    freshness: 'old',
-                    id: query.id,
-                    offset: oldOffsetData.offset
-                  });
-                }
-                if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.publish(self._getViewChannelName(viewName, newOffsetData.predicateData, query.type), {
-                    type: 'update',
-                    freshness: 'new',
-                    id: query.id,
-                    offset: newOffsetData.offset
-                  });
-                }
+            if (oldOffsetData.offset != newOffsetData.offset) {
+              if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
+                self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
+                  type: 'update',
+                  freshness: 'old',
+                  id: query.id,
+                  offset: oldOffsetData.offset
+                });
               }
-            });
-          }
-        });
-      }
+              if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
+                self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
+                  type: 'update',
+                  freshness: 'new',
+                  id: query.id,
+                  offset: newOffsetData.offset
+                });
+              }
+            }
+          });
+        }
+      });
     }
     callback && callback(err);
   };
@@ -437,54 +416,50 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
       query: query
     };
 
+    var modelInstance;
+    var loadModelInstanceAndGetViewOffsets = function (cb) {
+      ModelClass.get(query.id).run().then(function (instance) {
+        modelInstance = instance;
+        self._getDocumentViewOffsets(modelInstance, query, cb);
+      }).error(cb);
+    };
+
     if (query.field) {
       if (query.field == 'id') {
         var error = new Error('Cannot modify the id field of an existing document');
         error.name = 'CRUDInvalidOperation';
         savedHandler(error);
       } else {
-        if (query.optimization != null) {
-          tasks.push(function (cb) {
-            self._getDocumentViewOffsets(query.id, query, cb);
-          });
-        }
+        tasks.push(loadModelInstanceAndGetViewOffsets);
 
         tasks.push(function (cb) {
-          ModelClass.get(query.id).run().then(function (instance) {
-            filterRequest.resource = instance;
-            applyPostFilter(filterRequest, function (err) {
-              if (err) {
-                cb(err);
-              } else {
-                instance[query.field] = query.value;
-                instance.save(cb);
-              }
-            });
-          }).error(cb);
+          filterRequest.resource = modelInstance;
+          applyPostFilter(filterRequest, function (err) {
+            if (err) {
+              cb(err);
+            } else {
+              modelInstance[query.field] = query.value;
+              modelInstance.save(cb);
+            }
+          });
         });
       }
     } else {
       if (typeof query.value == 'object') {
-        if (query.optimization != null) {
-          tasks.push(function (cb) {
-            self._getDocumentViewOffsets(query.id, query, cb);
-          });
-        }
+        tasks.push(loadModelInstanceAndGetViewOffsets);
 
         tasks.push(function (cb) {
-          ModelClass.get(query.id).run().then(function (instance) {
-            filterRequest.resource = instance;
-            applyPostFilter(filterRequest, function (err) {
-              if (err) {
-                cb(err);
-              } else {
-                _.forOwn(query.value, function (value, field) {
-                  instance[field] = value;
-                });
-                instance.save(cb);
-              }
-            });
-          }).error(cb);
+          filterRequest.resource = modelInstance;
+          applyPostFilter(filterRequest, function (err) {
+            if (err) {
+              cb(err);
+            } else {
+              _.forOwn(query.value, function (value, field) {
+                modelInstance[field] = value;
+              });
+              modelInstance.save(cb);
+            }
+          });
         });
       } else {
         var error = new Error('Cannot replace document with a primitive - Must be an object');
@@ -497,11 +472,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         if (err) {
           savedHandler(err);
         } else {
-          if (query.optimization == null) {
-            savedHandler(null, null, results[0]);
-          } else {
-            savedHandler(null, results[0], results[1]);
-          }
+          savedHandler(null, results[0], results[1]);
         }
       });
     }
@@ -522,22 +493,22 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
           type: 'delete'
         });
       } else {
-        _.forOwn(result, function (value, field) {
+        var deletedFields;
+        var modelSchema = self.schema[query.type];
+        if (modelSchema && modelSchema.fields) {
+          deletedFields = modelSchema.fields;
+        } else {
+          deletedFields = result;
+        }
+        _.forOwn(deletedFields, function (value, field) {
           self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + field, {
             type: 'delete'
           });
         });
-      }
 
-      if (query.optimization == null) {
-        self.publish(self.channelPrefix + query.type, {
-          type: 'delete',
-          id: query.id
-        });
-      } else {
         _.forOwn(viewOffsets, function (offsetData, viewName) {
           if (self._isWithinRealtimeBounds(offsetData.offset)) {
-            self.publish(self._getViewChannelName(viewName, offsetData.predicateData, query.type), {
+            self.publish(self._getViewChannelName(viewName, offsetData.viewParams, query.type), {
               type: 'delete',
               id: query.id,
               offset: offsetData.offset
@@ -562,11 +533,13 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
       error.name = 'CRUDInvalidParams';
       deletedHandler(error);
     } else {
-      if (query.optimization != null) {
-        tasks.push(function (cb) {
-          self._getDocumentViewOffsets(query.id, query, cb);
-        });
-      }
+      var modelInstance;
+      tasks.push(function (cb) {
+        ModelClass.get(query.id).run().then(function (instance) {
+          modelInstance = instance;
+          self._getDocumentViewOffsets(modelInstance, query, cb);
+        }).error(cb);
+      });
 
       // If socket does not exist, then the CRUD operation comes from the server-side
       // and we don't need to pass it through a filter.
@@ -589,30 +562,26 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
 
       if (query.field == null) {
         tasks.push(function (cb) {
-          ModelClass.get(query.id).run().then(function (instance) {
-            filterRequest.resource = instance;
-            applyPostFilter(filterRequest, function (err) {
-              if (err) {
-                cb(err);
-              } else {
-                instance.delete(cb);
-              }
-            });
-          }).error(cb);
+          filterRequest.resource = modelInstance;
+          applyPostFilter(filterRequest, function (err) {
+            if (err) {
+              cb(err);
+            } else {
+              modelInstance.delete(cb);
+            }
+          });
         });
       } else {
         tasks.push(function (cb) {
-          ModelClass.get(query.id).run().then(function (instance) {
-            filterRequest.resource = instance;
-            applyPostFilter(filterRequest, function (err) {
-              if (err) {
-                cb(err);
-              } else {
-                delete instance[query.field];
-                instance.save(cb);
-              }
-            });
-          }).error(cb);
+          filterRequest.resource = modelInstance;
+          applyPostFilter(filterRequest, function (err) {
+            if (err) {
+              cb(err);
+            } else {
+              delete modelInstance[query.field];
+              modelInstance.save(cb);
+            }
+          });
         });
       }
       if (tasks.length) {
@@ -620,11 +589,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
           if (err) {
             deletedHandler(err);
           } else {
-            if (query.optimization == null) {
-              deletedHandler(null, null, results[0]);
-            } else {
-              deletedHandler(null, results[0], results[1]);
-            }
+            deletedHandler(null, results[0], results[1]);
           }
         });
       }
