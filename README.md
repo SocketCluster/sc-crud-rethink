@@ -15,7 +15,7 @@ npm install sc-crud-rethink --save
 ```
 
 Now you will need to attach the plugin to your worker - So open ```worker.js``` and attach it to your worker instance like this:
-https://github.com/SocketCluster/sc-sample-inventory/blob/master/worker.js#L27-L81
+https://github.com/SocketCluster/sc-sample-inventory/blob/e0628b312642faa60c604a27f5eb2bfbd4231e24/worker.js#L121
 
 As shown in the sample above, you will need to provide a schema for your data.
 In the example above, the Category, Product, and User keys represent tables/models within RethinkDB - Inside each of these, you
