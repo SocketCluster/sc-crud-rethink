@@ -53,6 +53,9 @@ var SCCRUDRethink = function (options) {
   });
   this.options.cache = this.cache;
 
+  this.cache.on('expire', this._cleanupResourceChannel.bind(this));
+  this.cache.on('clear', this._cleanupResourceChannel.bind(this));
+
   if (this.scServer) {
     this.filter = new Filter(this.scServer, this.options);
 
@@ -81,6 +84,21 @@ var SCCRUDRethink = function (options) {
     // If no server is available, publish will be a no-op.
     this.publish = function () {};
   }
+};
+
+SCCRUDRethink.prototype._getResourceChannelName = function (resource) {
+  return this.channelPrefix + resource.type + '/' + resource.id;
+};
+
+SCCRUDRethink.prototype._cleanupResourceChannel = function (resource) {
+  var resourceChannelName = this._getResourceChannelName(resource);
+  var resourceChannel = this.scServer.exchange.channel(resourceChannelName);
+  resourceChannel.unsubscribe();
+  resourceChannel.destroy();
+};
+
+SCCRUDRethink.prototype._handleResourceChange = function (resource) {
+  this.cache.clear(resource);
 };
 
 SCCRUDRethink.prototype._getViews = function (type) {
@@ -172,6 +190,12 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
     if (err) {
       callback && callback(err);
     } else {
+      var resourceChannelName = self._getResourceChannelName({
+        type: query.type,
+        id: result.id
+      });
+      self.publish(resourceChannelName, 1);
+
       self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
         if (!err) {
           _.forOwn(viewOffsets, function (offsetData, viewName) {
@@ -289,7 +313,26 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       var dataProvider = function (cb) {
         ModelClass.get(query.id).run(cb);
       };
-      self.cache.pass(query, dataProvider, loadedHandler);
+      var resourceChannelName = self._getResourceChannelName(query);
+      var isSubscribedToResourceChannel = self.scServer.exchange.isSubscribed(resourceChannelName);
+      if (isSubscribedToResourceChannel) {
+        self.cache.pass(query, dataProvider, loadedHandler);
+      } else {
+        function handleResourceSubscribeFailure(err) {
+          resourceChannel.removeListener('subscribe', handleResourceSubscribe);
+          var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
+          error.name = 'FailedToSubscribeToResourceChannel';
+          loadedHandler(error);
+        }
+        function handleResourceSubscribe() {
+          resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
+          self.cache.pass(query, dataProvider, loadedHandler);
+        }
+        var resourceChannel = self.scServer.exchange.subscribe(resourceChannelName);
+        resourceChannel.once('subscribe', handleResourceSubscribe);
+        resourceChannel.once('subscribeFail', handleResourceSubscribeFailure);
+        resourceChannel.watch(self._handleResourceChange.bind(self, query));
+      }
     } else {
       var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.viewParams);
 
@@ -333,6 +376,9 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
 
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
+      var resourceChannelName = self._getResourceChannelName(query);
+      self.publish(resourceChannelName, 1);
+
       if (query.field) {
         var cleanValue = query.value;
         if (cleanValue === undefined) {
