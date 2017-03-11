@@ -7,14 +7,7 @@ var Cache = function (options) {
   this._cache = {};
   this.options = options || {};
   this.cacheDuration = this.options.cacheDuration || 10000;
-  this.brokerEngine = this.options.brokerEngine;
   this.cacheDisabled = !!this.options.cacheDisabled;
-
-  if (!this.cacheDisabled && this.brokerEngine) {
-    this.brokerEngine.on('message', function (message) {
-      self.update(message.channel, message.data);
-    });
-  }
 };
 
 Cache.prototype = Object.create(EventEmitter.prototype);

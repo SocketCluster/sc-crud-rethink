@@ -29,14 +29,12 @@ var SCCRUDRethink = function (options) {
   });
   this.options.models = this.models;
 
-  var brokerEngine, cacheDisabled;
+  var cacheDisabled;
   if (this.options.worker) {
     this.scServer = this.options.worker.scServer;
-    brokerEngine = this.scServer.brokerEngine;
     cacheDisabled = this.options.cacheDisabled || false;
   } else {
     this.scServer = null;
-    brokerEngine = null;
     if (this.options.hasOwnProperty('cacheDisabled')) {
       cacheDisabled = this.options.cacheDisabled || false;
     } else {
@@ -47,7 +45,6 @@ var SCCRUDRethink = function (options) {
   }
 
   this.cache = new Cache({
-    brokerEngine: brokerEngine,
     cacheDisabled: cacheDisabled,
     cacheDuration: this.options.cacheDuration
   });
@@ -60,22 +57,6 @@ var SCCRUDRethink = function (options) {
     this.filter = new Filter(this.scServer, this.options);
 
     this.publish = this.scServer.exchange.publish.bind(this.scServer.exchange);
-
-    // Monkey-patch the exchange.publish method in order to automatically
-    // update the cache when a publish is made for a specific CRUD resource.
-    // from outside this module.
-    this.scServer.exchange.publish = function (channel, data, callback) {
-      if (channel && channel.indexOf && channel.indexOf('crud>') == 0) {
-        if (data == null) {
-          // If data is null, then we will clear the whole cache for that resource.
-          var resourceQuery = parseChannelResourceQuery(channel);
-          self.cache.clear(resourceQuery);
-        } else {
-          self.cache.update(channel, data);
-        }
-      }
-      self.publish.apply(self.scServer.exchange, arguments);
-    };
 
     this.scServer.on('_handshake', function (socket) {
       self._attachSocket(socket);
