@@ -295,7 +295,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         ModelClass.get(query.id).run(cb);
       };
       var resourceChannelName = self._getResourceChannelName(query);
-      var isSubscribedToResourceChannel = self.scServer.exchange.isSubscribed(resourceChannelName);
+      var isSubscribedToResourceChannel = self.scServer.exchange.isSubscribed(resourceChannelName, true);
       if (isSubscribedToResourceChannel) {
         self.cache.pass(query, dataProvider, loadedHandler);
       } else {
