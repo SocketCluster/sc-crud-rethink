@@ -94,6 +94,10 @@ SCCRUDRethink.prototype._isValidView = function (type, viewName) {
   return modelViews.hasOwnProperty(viewName);
 };
 
+// Find the offset index of a document within each of its affected views.
+// Later, we can use this information to determine how a change to a document's
+// property affects each view within the overal system (and which page
+// numbers are affected within those views).
 SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, callback) {
   var self = this;
   var ModelClass = this.models[query.type];
@@ -160,6 +164,11 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, ty
   return this.channelPrefix + viewName + '(' + viewParamsString + '):' + type;
 };
 
+// Add a new document to a collection. This will send a change notification to each
+// affected view (taking into account the affected page number within each view).
+// This allows views to update themselves on the front-end in real-time.
+// Note that for efficiency reasons, a client will not receive notifications
+// for pages other than the one that it is currently on.
 SCCRUDRethink.prototype.create = function (query, callback, socket) {
   var self = this;
 
@@ -233,6 +242,10 @@ SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceCh
   delete this._resourceReadBuffer[resourceChannelName];
 };
 
+// Read either a collection of IDs, a single document or a single field
+// within a document. To achieve efficient field-level granularity, a cache is used.
+// A cache entry will automatically get cleared when sc-crud-rethink detects
+// a real-time change to a field which is cached.
 SCCRUDRethink.prototype.read = function (query, callback, socket) {
   var self = this;
 
@@ -384,6 +397,12 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
   }
 };
 
+// Update a single whole document or one or more fields within a document.
+// Whenever a document is updated, it may affect the ordering and pagination of
+// certain views. This update operation will send notifications to all affected
+// clients to let them know if a view/page that they are currently looking at
+// has been affected by the update operation - This allows them to update themselves
+// in real-time with pagination.
 SCCRUDRethink.prototype.update = function (query, callback, socket) {
   var self = this;
 
@@ -542,6 +561,9 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
   }
 };
 
+// Delete a single document or field from a document.
+// This will notify affected views so that they may update themselves
+// in real-time.
 SCCRUDRethink.prototype.delete = function (query, callback, socket) {
   var self = this;
 
