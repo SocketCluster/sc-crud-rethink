@@ -212,7 +212,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
 
 SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceChannelName, query, dataProvider) {
   var self = this;
-  
+
   var callbackList = this._resourceReadBuffer[resourceChannelName] || [];
   if (error) {
     callbackList.forEach(function (callback) {
@@ -313,11 +313,10 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         ModelClass.get(query.id).run(cb);
       };
       var resourceChannelName = self._getResourceChannelName(query);
-      // var isSubscribedToResourceChannel = self.scServer.exchange.isSubscribed(resourceChannelName, true);
+
       var isSubscribedToResourceChannel = self.scServer.exchange.isSubscribed(resourceChannelName);
       var isSubscribedToResourceChannelOrPending = self.scServer.exchange.isSubscribed(resourceChannelName, true);
       var isSubcriptionPending = !isSubscribedToResourceChannel && isSubscribedToResourceChannelOrPending;
-      // ----
 
       if (!self._resourceReadBuffer[resourceChannelName]) {
         self._resourceReadBuffer[resourceChannelName] = [];
@@ -332,15 +331,14 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         // If there is no pending subscription, then we should create one and process the
         // buffer when we're subscribed.
         function handleResourceSubscribeFailure(err) {
+          // TODO test failure case
           resourceChannel.removeListener('subscribe', handleResourceSubscribe);
           var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
           error.name = 'FailedToSubscribeToResourceChannel';
-          // loadedHandler(error);
           self._processResourceReadBuffer(error, resourceChannelName, query, dataProvider);
         }
         function handleResourceSubscribe() {
           resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
-          // self.cache.pass(query, dataProvider, loadedHandler);
           self._processResourceReadBuffer(null, resourceChannelName, query, dataProvider);
         }
 
@@ -349,26 +347,6 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         resourceChannel.once('subscribeFail', handleResourceSubscribeFailure);
         resourceChannel.watch(self._handleResourceChange.bind(self, query));
       }
-
-
-      // if (isSubscribedToResourceChannel) {
-      //   self.cache.pass(query, dataProvider, loadedHandler);
-      // } else {
-      //   function handleResourceSubscribeFailure(err) {
-      //     resourceChannel.removeListener('subscribe', handleResourceSubscribe);
-      //     var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
-      //     error.name = 'FailedToSubscribeToResourceChannel';
-      //     loadedHandler(error);
-      //   }
-      //   function handleResourceSubscribe() {
-      //     resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
-      //     self.cache.pass(query, dataProvider, loadedHandler);
-      //   }
-      //   var resourceChannel = self.scServer.exchange.subscribe(resourceChannelName);
-      //   resourceChannel.once('subscribe', handleResourceSubscribe);
-      //   resourceChannel.once('subscribeFail', handleResourceSubscribeFailure);
-      //   resourceChannel.watch(self._handleResourceChange.bind(self, query));
-      // }
     } else {
       var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, query.view, query.viewParams);
 

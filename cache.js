@@ -33,7 +33,7 @@ Cache.prototype.set = function (query, data, resourcePath) {
     resourcePath = this._getResourcePath(query);
   }
   var entry = {
-    data: data
+    resource: data
   };
 
   var existingCache = this._cache[resourcePath];
@@ -42,7 +42,7 @@ Cache.prototype.set = function (query, data, resourcePath) {
   }
 
   entry.timeout = setTimeout(function () {
-    var freshEntry = self._cache[resourcePath];
+    var freshEntry = self._cache[resourcePath] || {};
     delete self._cache[resourcePath];
     self.emit('expire', self._simplifyQuery(query), freshEntry);
   }, this.cacheDuration);
@@ -68,13 +68,14 @@ Cache.prototype.get = function (query, resourcePath) {
     resourcePath = this._getResourcePath(query);
   }
   var entry = this._cache[resourcePath] || {};
-  return entry.data;
+  return entry.resource;
 };
 
 Cache.prototype._pushWatcher = function (resourcePath, watcher) {
   if (!this._watchers[resourcePath]) {
     this._watchers[resourcePath] = [];
   }
+  // TODO: check for memory leak
   this._watchers[resourcePath].push(watcher);
 };
 
@@ -133,29 +134,8 @@ Cache.prototype.pass = function (query, provider, callback) {
           resource: data
         };
 
-        // self._cache[resourcePath] = newCacheEntry;
-
         self.set(query, newCacheEntry, resourcePath);
         self.emit('set', self._simplifyQuery(query), newCacheEntry);
-
-        // var freshCacheEntry = self.get(query, resourcePath);
-        // if (freshCacheEntry) {
-        //   // Replace pending entry with a proper entry.
-        //   // But keep old expiry as is.
-        //   self._cache[resourcePath] = {
-        //     resource: data
-        //   };
-        // } else {
-        //   // This is an unusual case if the pending cache entry expired
-        //   // before the provider data was resolved.
-        //   // Set a new cache entry with fresh expiry.
-        //   var entry = {
-        //     resource: data
-        //   };
-        //   self.set(query, entry, resourcePath);
-        //   self.emit('set', self._simplifyQuery(query), entry);
-        // }
-
 
         watcherList.forEach(function (watcher) {
           watcher(null, data);
