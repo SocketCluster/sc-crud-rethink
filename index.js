@@ -210,6 +210,13 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
   }
 };
 
+SCCRUDRethink.prototype._appendToResourceReadBuffer = function (resourceChannelName, loadedHandler) {
+  if (!this._resourceReadBuffer[resourceChannelName]) {
+    this._resourceReadBuffer[resourceChannelName] = [];
+  }
+  this._resourceReadBuffer[resourceChannelName].push(loadedHandler);
+};
+
 SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceChannelName, query, dataProvider) {
   var self = this;
 
@@ -318,10 +325,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       var isSubscribedToResourceChannelOrPending = self.scServer.exchange.isSubscribed(resourceChannelName, true);
       var isSubcriptionPending = !isSubscribedToResourceChannel && isSubscribedToResourceChannelOrPending;
 
-      if (!self._resourceReadBuffer[resourceChannelName]) {
-        self._resourceReadBuffer[resourceChannelName] = [];
-      }
-      self._resourceReadBuffer[resourceChannelName].push(loadedHandler);
+      self._appendToResourceReadBuffer(resourceChannelName, loadedHandler);
 
       if (isSubscribedToResourceChannel) {
         // If it is fully subscribed, we can process the request straight away since we are
@@ -331,7 +335,6 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         // If there is no pending subscription, then we should create one and process the
         // buffer when we're subscribed.
         function handleResourceSubscribeFailure(err) {
-          // TODO test failure case
           resourceChannel.removeListener('subscribe', handleResourceSubscribe);
           var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
           error.name = 'FailedToSubscribeToResourceChannel';

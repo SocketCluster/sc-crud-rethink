@@ -2,8 +2,6 @@ var _ = require('lodash');
 var EventEmitter = require('events').EventEmitter;
 
 var Cache = function (options) {
-  var self = this;
-
   this._cache = {};
   this._watchers = {};
   this.options = options || {};
@@ -75,8 +73,22 @@ Cache.prototype._pushWatcher = function (resourcePath, watcher) {
   if (!this._watchers[resourcePath]) {
     this._watchers[resourcePath] = [];
   }
-  // TODO: check for memory leak
   this._watchers[resourcePath].push(watcher);
+};
+
+Cache.prototype._processCacheWatchers = function (resourcePath, error, data) {
+  var watcherList = this._watchers[resourcePath] || [];
+
+  if (error) {
+    watcherList.forEach(function (watcher) {
+      watcher(error);
+    });
+  } else {
+    watcherList.forEach(function (watcher) {
+      watcher(null, data);
+    });
+  }
+  delete this._watchers[resourcePath];
 };
 
 Cache.prototype.pass = function (query, provider, callback) {
@@ -96,12 +108,12 @@ Cache.prototype.pass = function (query, provider, callback) {
 
   var cacheEntry = this.get(query, resourcePath);
 
+  this._pushWatcher(resourcePath, callback);
+
   if (cacheEntry) {
     this.emit('hit', query, cacheEntry);
-    if (cacheEntry.pending) {
-      this._pushWatcher(resourcePath, callback);
-    } else {
-      callback(null, cacheEntry.resource);
+    if (!cacheEntry.pending) {
+      self._processCacheWatchers(resourcePath, null, cacheEntry.resource);
     }
   } else {
     this.emit('miss', query);
@@ -109,19 +121,12 @@ Cache.prototype.pass = function (query, provider, callback) {
       pending: true,
       patch: {}
     };
-    this._pushWatcher(resourcePath, callback);
 
     this.set(query, cacheEntry, resourcePath);
     this.emit('set', this._simplifyQuery(query), cacheEntry);
 
     provider(function (err, data) {
-      var watcherList = self._watchers[resourcePath] || [];
-
-      if (err) {
-        watcherList.forEach(function (watcher) {
-          watcher(err);
-        });
-      } else {
+      if (!err) {
         var freshCacheEntry = self._cache[resourcePath];
 
         if (freshCacheEntry) {
@@ -136,12 +141,8 @@ Cache.prototype.pass = function (query, provider, callback) {
 
         self.set(query, newCacheEntry, resourcePath);
         self.emit('set', self._simplifyQuery(query), newCacheEntry);
-
-        watcherList.forEach(function (watcher) {
-          watcher(null, data);
-        });
       }
-      delete self._watchers[resourcePath];
+      self._processCacheWatchers(resourcePath, err, data);
     });
   }
 };
