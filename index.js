@@ -73,6 +73,10 @@ SCCRUDRethink.prototype._getResourceChannelName = function (resource) {
   return this.channelPrefix + resource.type + '/' + resource.id;
 };
 
+SCCRUDRethink.prototype._getResourcePropertyChannelName = function (resourceProperty) {
+  return this.channelPrefix + resourceProperty.type + '/' + resourceProperty.id + '/' + resourceProperty.field;
+};
+
 SCCRUDRethink.prototype._cleanupResourceChannel = function (resource) {
   var resourceChannelName = this._getResourceChannelName(resource);
   var resourceChannel = this.scServer.exchange.channel(resourceChannelName);
@@ -163,6 +167,84 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, ty
   return this.channelPrefix + viewName + '(' + viewParamsString + '):' + type;
 };
 
+/*
+  If you update the database outside of sc-crud-rethink, you can use this method
+  to clear sc-crud-rethink cache for a resource and notify all client subscribers
+  about the change.
+
+  The updateDetails argument must be an object with the following properties:
+    type: The resource type which was updated (name of the collection).
+    id: The id of the specific resource/document which was updated.
+    fields (optional): Fields which were updated within the resource - Can be either
+      an array of field names or an object where each key represents a field name
+      and each value represents the new updated value for the field (providing
+      updated values is a performance optimization).
+*/
+SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
+  var self = this;
+
+  var resourceChannelName = self._getResourceChannelName(updateDetails);
+  // This will cause the resource cache to clear itself.
+  self.publish(resourceChannelName);
+
+  var fields = updateDetails.fields || [];
+  if (Array.isArray(fields)) {
+    fields.forEach(function (fieldName) {
+      var resourcePropertyChannelName = self._getResourcePropertyChannelName({
+        type: updateDetails.type,
+        id: updateDetails.id,
+        field: fieldName
+      });
+      // Notify individual field subscribers about the change.
+      self.publish(resourcePropertyChannelName);
+    });
+  } else {
+    // Notify individual field subscribers about the change and provide the new value.
+    Object.keys(fields).forEach(function (fieldName) {
+      var fieldValue = fields[fieldName];
+      var resourcePropertyChannelName = self._getResourcePropertyChannelName({
+        type: updateDetails.type,
+        id: updateDetails.id,
+        field: fieldName
+      });
+      self.publish(resourcePropertyChannelName, {
+        type: 'update',
+        value: fieldValue
+      });
+    });
+  }
+};
+
+/*
+  If you update the database outside of sc-crud-rethink, you can use this method
+  to clear sc-crud-rethink cache for a view and notify all client subscribers
+  about the change.
+
+  The updateDetails argument must be an object with the following properties:
+    view: The name of the view.
+    params: The predicate object/value which defines the affected view.
+    type: The resource type which was updated (name of the collection).
+    offsets (optional): An array of affected indexes within the view which
+    were affected by the update (this is for performance optimization).
+*/
+SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
+  var self = this;
+
+  var viewChannelName = self._getViewChannelName(
+    updateDetails.view,
+    updateDetails.params,
+    updateDetails.type
+  );
+  var offsets = updateDetails.offsets || [];
+  if (offsets.length) {
+    offsets.forEach(function (offset) {
+      self.publish(viewChannelName, {offset: offset});
+    });
+  } else {
+    self.publish(viewChannelName);
+  }
+};
+
 // Add a new document to a collection. This will send a change notification to each
 // affected view (taking into account the affected page number within each view).
 // This allows views to update themselves on the front-end in real-time.
@@ -183,7 +265,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
         type: query.type,
         id: result.id
       });
-      self.publish(resourceChannelName, 1);
+      self.publish(resourceChannelName);
 
       self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
         if (!err) {
@@ -344,15 +426,15 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       } else if (!isSubcriptionPending) {
         // If there is no pending subscription, then we should create one and process the
         // buffer when we're subscribed.
+        function handleResourceSubscribe() {
+          resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
+          self._processResourceReadBuffer(null, resourceChannelName, query, dataProvider);
+        }
         function handleResourceSubscribeFailure(err) {
           resourceChannel.removeListener('subscribe', handleResourceSubscribe);
           var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
           error.name = 'FailedToSubscribeToResourceChannel';
           self._processResourceReadBuffer(error, resourceChannelName, query, dataProvider);
-        }
-        function handleResourceSubscribe() {
-          resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
-          self._processResourceReadBuffer(null, resourceChannelName, query, dataProvider);
         }
 
         var resourceChannel = self.scServer.exchange.subscribe(resourceChannelName);
@@ -410,7 +492,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
   var savedHandler = function (err, oldViewOffsets, queryResult) {
     if (!err) {
       var resourceChannelName = self._getResourceChannelName(query);
-      self.publish(resourceChannelName, 1);
+      self.publish(resourceChannelName);
 
       if (query.field) {
         var cleanValue = query.value;
