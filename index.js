@@ -3,11 +3,14 @@ var thinky = require('thinky');
 var async = require('async');
 var Filter = require('./filter');
 var Cache = require('./cache');
+var EventEmitter = require('events').EventEmitter;
 var jsonStableStringify = require('json-stable-stringify');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
 var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
 var SCCRUDRethink = function (options) {
+  EventEmitter.call(this);
+
   var self = this;
 
   this.options = options || {};
@@ -69,6 +72,8 @@ var SCCRUDRethink = function (options) {
   }
 };
 
+SCCRUDRethink.prototype = Object.create(EventEmitter.prototype);
+
 SCCRUDRethink.prototype._getResourceChannelName = function (resource) {
   return this.channelPrefix + resource.type + '/' + resource.id;
 };
@@ -101,29 +106,42 @@ SCCRUDRethink.prototype._isValidView = function (type, viewName) {
 // Find the offset index of a document within each of its affected views.
 // Later, we can use this information to determine how a change to a document's
 // property affects each view within the overall system.
-SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, callback) {
+SCCRUDRethink.prototype._getDocumentViewOffsets = function (action, document, query, callback) {
   var self = this;
   var ModelClass = this.models[query.type];
 
   if (ModelClass) {
     var tasks = [];
 
-    var viewSchemaMap = this._getViews(query.type);
+    var changeSettings = {
+      type: query.type
+    };
 
-    _.forOwn(viewSchemaMap, function (viewSchema, viewName) {
-      var viewParams;
-      if (viewSchema.paramFields && viewSchema.paramFields.length) {
-        viewParams = {};
-        _.forEach(viewSchema.paramFields, function (fieldName) {
-          viewParams[fieldName] = document[fieldName];
-        });
-      } else {
-        viewParams = null;
-      }
+    if (action == 'afterCreate') {
+      changeSettings.oldResource = null;
+      changeSettings.newResource = document;
+    } else if (action == 'beforeUpdate') {
+      changeSettings.oldResource = document;
+      changeSettings.newResource = null;
+    } else if (action == 'afterUpdate') {
+      changeSettings.oldResource = null;
+      changeSettings.newResource = document;
+    } else {
+      // afterDelete
+      changeSettings.oldResource = document;
+      changeSettings.newResource = null;
+    }
+
+    var affectedViewSchemaMap = this.getAffectedViews(changeSettings);
+
+    affectedViewSchemaMap.forEach(function (viewData) {
+      var viewName = viewData.view;
+      var viewParams = viewData.params;
 
       tasks.push(function (cb) {
         var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, viewName, document);
 
+        // On an indexed result set, offsetsOf time complexity should be O(1).
         rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(document.id)).execute(function (err, documentOffsets) {
           if (err) {
             cb(err);
@@ -141,7 +159,9 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, cal
 
     async.parallel(tasks, function (err, results) {
       var viewOffetMap = {};
-      if (!err) {
+      if (err) {
+        self.emit('warning', err);
+      } else {
         results.forEach(function (viewOffset) {
           if (viewOffset != null) {
             viewOffetMap[viewOffset.view] = viewOffset;
@@ -158,13 +178,114 @@ SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
 };
 
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, type) {
-  var viewParamsString;
-  if (viewParams == null) {
-    viewParamsString = '';
-  } else {
-    viewParamsString = jsonStableStringify(viewParams);
-  }
+  var viewParamsString = jsonStableStringify(viewParams || {});
   return this.channelPrefix + viewName + '(' + viewParamsString + '):' + type;
+};
+
+SCCRUDRethink.prototype._areViewParamsEqual = function (viewParamsA, viewParamsB) {
+  var viewParamsStringA = jsonStableStringify(viewParamsA || {});
+  var viewParamsStringB = jsonStableStringify(viewParamsB || {});
+  return viewParamsStringA == viewParamsStringB;
+};
+
+SCCRUDRethink.prototype.getModifiedResourceFields = function (updateDetails) {
+  var oldResource = updateDetails.oldResource || {};
+  var newResource = updateDetails.newResource || {};
+  var modifiedFieldsMap = {};
+
+  _.forOwn(oldResource, function (value, fieldName) {
+    if (oldResource[fieldName] !== newResource[fieldName]) {
+      modifiedFieldsMap[fieldName] = {before: oldResource[fieldName], after: newResource[fieldName]};
+    }
+  });
+  _.forOwn(newResource, function (value, fieldName) {
+    if (!modifiedFieldsMap.hasOwnProperty(fieldName) && newResource[fieldName] !== oldResource[fieldName]) {
+      modifiedFieldsMap[fieldName] = {before: oldResource[fieldName], after: newResource[fieldName]};
+    }
+  });
+
+  return modifiedFieldsMap;
+};
+
+SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
+  var self = this;
+
+  var affectedViews = [];
+
+  var refResource = updateDetails.oldResource || updateDetails.newResource || {};
+  var oldResource = updateDetails.oldResource || {};
+  var newResource = updateDetails.newResource || {};
+  var updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
+
+  var viewSchemaMap = this._getViews(updateDetails.type);
+  _.forOwn(viewSchemaMap, function (viewSchema, viewName) {
+    var paramFields = viewSchema.paramFields || [];
+    var affectingFields = viewSchema.affectingFields || [];
+    var isViewAffectedByUpdate = false;
+
+    var allAffectingFields = paramFields.concat(affectingFields);
+    allAffectingFields.push('id');
+
+    var allAffectingLength = allAffectingFields.length;
+    for (var i = 0; i < allAffectingLength; i++) {
+      var fieldName = allAffectingFields[i];
+      if (updatedFieldsMap[fieldName]) {
+        isViewAffectedByUpdate = true;
+        break;
+      }
+    }
+
+    if (isViewAffectedByUpdate) {
+      var viewParamsBefore = {};
+      var viewParamsAfter = {};
+
+      var sameViewParamsBeforeAndAfter = true;
+
+      paramFields.forEach(function (fieldName) {
+        if (updatedFieldsMap[fieldName]) {
+          var before = updatedFieldsMap[fieldName].before;
+          var after = updatedFieldsMap[fieldName].after;
+          viewParamsBefore[fieldName] = before;
+          viewParamsAfter[fieldName] = after;
+          if (before !== after) {
+            sameViewParamsBeforeAndAfter = false;
+          }
+        } else {
+          if (refResource[fieldName] === undefined) {
+            viewParamsBefore[fieldName] = null;
+            viewParamsAfter[fieldName] = null;
+          } else {
+            viewParamsBefore[fieldName] = refResource[fieldName];
+            viewParamsAfter[fieldName] = refResource[fieldName];
+          }
+        }
+      });
+
+      if (sameViewParamsBeforeAndAfter) {
+        affectedViews.push({
+          view: viewName,
+          type: updateDetails.type,
+          params: viewParamsAfter
+        });
+      } else {
+        if (updateDetails.oldResource) {
+          affectedViews.push({
+            view: viewName,
+            type: updateDetails.type,
+            params: viewParamsBefore
+          });
+        }
+        if (updateDetails.newResource) {
+          affectedViews.push({
+            view: viewName,
+            type: updateDetails.type,
+            params: viewParamsAfter
+          });
+        }
+      }
+    }
+  });
+  return affectedViews;
 };
 
 /*
@@ -245,6 +366,45 @@ SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
   }
 };
 
+/*
+  If you update the database outside of sc-crud-rethink, you can use this method
+  to clear sc-crud-rethink cache and notify all client subscribers (both the resource
+  and any affected views) about the change.
+
+  The updateDetails argument must be an object with the following properties:
+    type: The resource type which was updated (name of the collection).
+    oldResource: The old document/resource before the update was made.
+      If the resource did not exist before (newly created), then this
+      should be set to null.
+    newResource: The new document/resource after the update was made.
+      If the resource no longer exists after the operation (deleted), then
+      this should be set to null.
+*/
+SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
+  var self = this;
+
+  var refResource = updateDetails.oldResource || updateDetails.newResource || {};
+  var oldResource = updateDetails.oldResource || {};
+  var newResource = updateDetails.newResource || {};
+
+  var updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
+
+  this.notifyResourceUpdate({
+    type: updateDetails.type,
+    id: refResource.id,
+    fields: Object.keys(updatedFieldsMap)
+  });
+
+  var affectedViews = this.getAffectedViews(updateDetails);
+  affectedViews.forEach(function (viewData) {
+    self.notifyViewUpdate({
+      view: viewData.view,
+      params: viewData.params,
+      type: viewData.type
+    });
+  });
+};
+
 // Add a new document to a collection. This will send a change notification to each
 // affected view (taking into account the affected page number within each view).
 // This allows views to update themselves on the front-end in real-time.
@@ -267,8 +427,10 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
       });
       self.publish(resourceChannelName);
 
-      self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
-        if (!err) {
+      self._getDocumentViewOffsets('afterCreate', result, query, function (err, viewOffsets) {
+        if (err) {
+          self.emit('warning', err);
+        } else {
           _.forOwn(viewOffsets, function (offsetData, viewName) {
             if (self._isWithinRealtimeBounds(offsetData.offset)) {
               self.publish(self._getViewChannelName(viewName, offsetData.viewParams, query.type), {
@@ -490,7 +652,9 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
   }
 
   var savedHandler = function (err, oldViewOffsets, queryResult) {
-    if (!err) {
+    if (err) {
+      self.emit('warning', err);
+    } else {
       var resourceChannelName = self._getResourceChannelName(query);
       self.publish(resourceChannelName);
 
@@ -515,28 +679,44 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
 
-      self._getDocumentViewOffsets(queryResult, query, function (err, newViewOffsets) {
-        if (!err) {
+      self._getDocumentViewOffsets('afterUpdate', queryResult, query, function (err, newViewOffsets) {
+        if (err) {
+          self.emit('warning', err);
+        } else {
           _.forOwn(newViewOffsets, function (newOffsetData, viewName) {
             var oldOffsetData = oldViewOffsets[viewName] || {};
             newOffsetData = newOffsetData || {};
 
             if (oldOffsetData.offset != newOffsetData.offset) {
-              if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
-                  type: 'update',
-                  freshness: 'old',
-                  id: query.id,
-                  offset: oldOffsetData.offset
-                });
-              }
-              if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
-                  type: 'update',
-                  freshness: 'new',
-                  id: query.id,
-                  offset: newOffsetData.offset
-                });
+              var areViewParamsEqual = self._areViewParamsEqual(oldOffsetData.viewParams, newOffsetData.viewParams);
+              console.log(111, areViewParamsEqual);
+              if (areViewParamsEqual) {
+                if (self._isWithinRealtimeBounds(oldOffsetData.offset) || self._isWithinRealtimeBounds(newOffsetData.offset)) {
+                  self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
+                    type: 'update',
+                    action: 'move',
+                    id: query.id,
+                    oldOffset: oldOffsetData.offset,
+                    newOffset: newOffsetData.offset
+                  });
+                }
+              } else {
+                if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
+                  self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
+                    type: 'update',
+                    action: 'remove',
+                    id: query.id,
+                    offset: oldOffsetData.offset
+                  });
+                }
+                if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
+                  self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
+                    type: 'update',
+                    action: 'add',
+                    id: query.id,
+                    offset: newOffsetData.offset
+                  });
+                }
               }
             }
           });
@@ -581,7 +761,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     var loadModelInstanceAndGetViewOffsets = function (cb) {
       ModelClass.get(query.id).run().then(function (instance) {
         modelInstance = instance;
-        self._getDocumentViewOffsets(modelInstance, query, cb);
+        self._getDocumentViewOffsets('beforeUpdate', modelInstance, query, cb);
       }).error(cb);
     };
 
@@ -651,7 +831,9 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
   }
 
   var deletedHandler = function (err, viewOffsets, result) {
-    if (!err) {
+    if (err) {
+      self.emit('warning', err);
+    } else {
       if (query.field) {
         self.publish(self.channelPrefix + query.type + '/' + query.id + '/' + query.field, {
           type: 'delete'
@@ -701,7 +883,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
       tasks.push(function (cb) {
         ModelClass.get(query.id).run().then(function (instance) {
           modelInstance = instance;
-          self._getDocumentViewOffsets(modelInstance, query, cb);
+          self._getDocumentViewOffsets('afterDelete', modelInstance, query, cb);
         }).error(cb);
       });
 
