@@ -13,8 +13,8 @@ module.exports.constructTransformedRethinkQuery = function (options, ModelClass,
   var rethinkQuery = ModelClass;
 
   var sanitizedViewParams;
-  if (viewParams == undefined) {
-    sanitizedViewParams = null;
+  if (typeof viewParams != 'object') {
+    sanitizedViewParams = {};
   } else {
     sanitizedViewParams = viewParams;
   }

@@ -106,7 +106,7 @@ SCCRUDRethink.prototype._isValidView = function (type, viewName) {
 // Find the offset index of a document within each of its affected views.
 // Later, we can use this information to determine how a change to a document's
 // property affects each view within the overall system.
-SCCRUDRethink.prototype._getDocumentViewOffsets = function (action, document, query, callback) {
+SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, callback) {
   var self = this;
   var ModelClass = this.models[query.type];
 
@@ -114,22 +114,11 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (action, document, qu
     var tasks = [];
 
     var changeSettings = {
-      type: query.type
+      type: query.type,
+      resource: document
     };
-
-    if (action == 'afterCreate') {
-      changeSettings.oldResource = null;
-      changeSettings.newResource = document;
-    } else if (action == 'beforeUpdate') {
-      changeSettings.oldResource = document;
-      changeSettings.newResource = null;
-    } else if (action == 'afterUpdate') {
-      changeSettings.oldResource = null;
-      changeSettings.newResource = document;
-    } else {
-      // afterDelete
-      changeSettings.oldResource = document;
-      changeSettings.newResource = null;
+    if (query.field) {
+      changeSettings.updatedFields = [query.field];
     }
 
     var affectedViewSchemaMap = this.getAffectedViews(changeSettings);
@@ -158,17 +147,17 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (action, document, qu
     });
 
     async.parallel(tasks, function (err, results) {
-      var viewOffetMap = {};
+      var viewOffsetMap = {};
       if (err) {
         self.emit('warning', err);
       } else {
         results.forEach(function (viewOffset) {
           if (viewOffset != null) {
-            viewOffetMap[viewOffset.view] = viewOffset;
+            viewOffsetMap[viewOffset.view] = viewOffset;
           }
         });
       }
-      callback(err, viewOffetMap);
+      callback(err, viewOffsetMap);
     });
   }
 };
@@ -211,78 +200,55 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   var self = this;
 
   var affectedViews = [];
-
-  var refResource = updateDetails.oldResource || updateDetails.newResource || {};
-  var oldResource = updateDetails.oldResource || {};
-  var newResource = updateDetails.newResource || {};
-  var updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
+  var resource = updateDetails.resource || {};
 
   var viewSchemaMap = this._getViews(updateDetails.type);
+
   _.forOwn(viewSchemaMap, function (viewSchema, viewName) {
     var paramFields = viewSchema.paramFields || [];
-    var affectingFields = viewSchema.affectingFields || [];
-    var isViewAffectedByUpdate = false;
 
-    var allAffectingFields = paramFields.concat(affectingFields);
-    allAffectingFields.push('id');
+    var viewParams = {};
+    paramFields.forEach(function (fieldName) {
+      viewParams[fieldName] = resource[fieldName];
+    });
 
-    var allAffectingLength = allAffectingFields.length;
-    for (var i = 0; i < allAffectingLength; i++) {
-      var fieldName = allAffectingFields[i];
-      if (updatedFieldsMap[fieldName]) {
-        isViewAffectedByUpdate = true;
-        break;
-      }
-    }
+    if (updateDetails.updatedFields) {
+      var updatedFields = updateDetails.updatedFields;
+      var affectingFields = viewSchema.affectingFields || [];
+      var isViewAffectedByUpdate = false;
 
-    if (isViewAffectedByUpdate) {
-      var viewParamsBefore = {};
-      var viewParamsAfter = {};
-
-      var sameViewParamsBeforeAndAfter = true;
-
+      var affectingFieldsLookup = {
+        id: true
+      };
       paramFields.forEach(function (fieldName) {
-        if (updatedFieldsMap[fieldName]) {
-          var before = updatedFieldsMap[fieldName].before;
-          var after = updatedFieldsMap[fieldName].after;
-          viewParamsBefore[fieldName] = before;
-          viewParamsAfter[fieldName] = after;
-          if (before !== after) {
-            sameViewParamsBeforeAndAfter = false;
-          }
-        } else {
-          if (refResource[fieldName] === undefined) {
-            viewParamsBefore[fieldName] = null;
-            viewParamsAfter[fieldName] = null;
-          } else {
-            viewParamsBefore[fieldName] = refResource[fieldName];
-            viewParamsAfter[fieldName] = refResource[fieldName];
-          }
-        }
+        affectingFieldsLookup[fieldName] = true;
+      });
+      affectingFields.forEach(function (fieldName) {
+        affectingFieldsLookup[fieldName] = true;
       });
 
-      if (sameViewParamsBeforeAndAfter) {
+      var modifiedFieldsLength = updatedFields.length;
+      for (var i = 0; i < modifiedFieldsLength; i++) {
+        var fieldName = updatedFields[i];
+        if (affectingFieldsLookup[fieldName]) {
+          isViewAffectedByUpdate = true;
+          break;
+        }
+      }
+
+      if (isViewAffectedByUpdate) {
         affectedViews.push({
           view: viewName,
           type: updateDetails.type,
-          params: viewParamsAfter
+          params: viewParams
         });
-      } else {
-        if (updateDetails.oldResource) {
-          affectedViews.push({
-            view: viewName,
-            type: updateDetails.type,
-            params: viewParamsBefore
-          });
-        }
-        if (updateDetails.newResource) {
-          affectedViews.push({
-            view: viewName,
-            type: updateDetails.type,
-            params: viewParamsAfter
-          });
-        }
       }
+    } else {
+      affectedViews.push({
+        view: viewName,
+        type: updateDetails.type,
+        params: viewParams
+      });
     }
   });
   return affectedViews;
@@ -296,7 +262,7 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   The updateDetails argument must be an object with the following properties:
     type: The resource type which was updated (name of the collection).
     id: The id of the specific resource/document which was updated.
-    fields (optional): Fields which were updated within the resource - Can be either
+    updatedFields (optional): Fields which were updated within the resource - Can be either
       an array of field names or an object where each key represents a field name
       and each value represents the new updated value for the field (providing
       updated values is a performance optimization).
@@ -308,9 +274,9 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   // This will cause the resource cache to clear itself.
   self.publish(resourceChannelName);
 
-  var fields = updateDetails.fields || [];
-  if (Array.isArray(fields)) {
-    fields.forEach(function (fieldName) {
+  var updatedFields = updateDetails.updatedFields || [];
+  if (Array.isArray(updatedFields)) {
+    updatedFields.forEach(function (fieldName) {
       var resourcePropertyChannelName = self._getResourcePropertyChannelName({
         type: updateDetails.type,
         id: updateDetails.id,
@@ -321,8 +287,8 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
     });
   } else {
     // Notify individual field subscribers about the change and provide the new value.
-    Object.keys(fields).forEach(function (fieldName) {
-      var fieldValue = fields[fieldName];
+    Object.keys(updatedFields).forEach(function (fieldName) {
+      var fieldValue = updatedFields[fieldName];
       var resourcePropertyChannelName = self._getResourcePropertyChannelName({
         type: updateDetails.type,
         id: updateDetails.id,
@@ -388,20 +354,46 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   var newResource = updateDetails.newResource || {};
 
   var updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
+  var updatedFieldsList = Object.keys(updatedFieldsMap);
+
+  if (!updatedFieldsList.length) {
+    return;
+  }
 
   this.notifyResourceUpdate({
     type: updateDetails.type,
     id: refResource.id,
-    fields: Object.keys(updatedFieldsMap)
+    updatedFields: updatedFieldsList
   });
 
-  var affectedViews = this.getAffectedViews(updateDetails);
-  affectedViews.forEach(function (viewData) {
+  var oldViewParams = {};
+  var oldResourceAffectedViews = this.getAffectedViews({
+    type: updateDetails.type,
+    resource: oldResource,
+    updatedFields: updatedFieldsList
+  });
+  oldResourceAffectedViews.forEach(function (viewData) {
+    oldViewParams[viewData.view] = viewData.params;
     self.notifyViewUpdate({
+      type: viewData.type,
       view: viewData.view,
-      params: viewData.params,
-      type: viewData.type
+      params: viewData.params
     });
+  });
+
+  var newResourceAffectedViews = this.getAffectedViews({
+    type: updateDetails.type,
+    resource: newResource,
+    updatedFields: updatedFieldsList
+  });
+  newResourceAffectedViews.forEach(function (viewData) {
+    if (!self._areViewParamsEqual(oldViewParams[viewData.view], viewData.params)) {
+      self.notifyViewUpdate({
+        type: viewData.type,
+        view: viewData.view,
+        params: viewData.params
+      });
+    }
   });
 };
 
@@ -427,7 +419,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
       });
       self.publish(resourceChannelName);
 
-      self._getDocumentViewOffsets('afterCreate', result, query, function (err, viewOffsets) {
+      self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
         if (err) {
           self.emit('warning', err);
         } else {
@@ -679,7 +671,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
 
-      self._getDocumentViewOffsets('afterUpdate', queryResult, query, function (err, newViewOffsets) {
+      self._getDocumentViewOffsets(queryResult, query, function (err, newViewOffsets) {
         if (err) {
           self.emit('warning', err);
         } else {
@@ -689,7 +681,6 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
 
             if (oldOffsetData.offset != newOffsetData.offset) {
               var areViewParamsEqual = self._areViewParamsEqual(oldOffsetData.viewParams, newOffsetData.viewParams);
-              console.log(111, areViewParamsEqual);
               if (areViewParamsEqual) {
                 if (self._isWithinRealtimeBounds(oldOffsetData.offset) || self._isWithinRealtimeBounds(newOffsetData.offset)) {
                   self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
@@ -761,7 +752,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     var loadModelInstanceAndGetViewOffsets = function (cb) {
       ModelClass.get(query.id).run().then(function (instance) {
         modelInstance = instance;
-        self._getDocumentViewOffsets('beforeUpdate', modelInstance, query, cb);
+        self._getDocumentViewOffsets(modelInstance, query, cb);
       }).error(cb);
     };
 
@@ -883,7 +874,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
       tasks.push(function (cb) {
         ModelClass.get(query.id).run().then(function (instance) {
           modelInstance = instance;
-          self._getDocumentViewOffsets('afterDelete', modelInstance, query, cb);
+          self._getDocumentViewOffsets(modelInstance, query, cb);
         }).error(cb);
       });
 
