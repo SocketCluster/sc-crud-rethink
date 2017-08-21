@@ -118,7 +118,7 @@ SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, cal
       resource: document
     };
     if (query.field) {
-      changeSettings.updatedFields = [query.field];
+      changeSettings.fields = [query.field];
     }
 
     var affectedViewSchemaMap = this.getAffectedViews(changeSettings);
@@ -212,8 +212,8 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
       viewParams[fieldName] = resource[fieldName];
     });
 
-    if (updateDetails.updatedFields) {
-      var updatedFields = updateDetails.updatedFields;
+    if (updateDetails.fields) {
+      var updatedFields = updateDetails.fields;
       var affectingFields = viewSchema.affectingFields || [];
       var isViewAffectedByUpdate = false;
 
@@ -262,7 +262,7 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   The updateDetails argument must be an object with the following properties:
     type: The resource type which was updated (name of the collection).
     id: The id of the specific resource/document which was updated.
-    updatedFields (optional): Fields which were updated within the resource - Can be either
+    fields (optional): Fields which were updated within the resource - Can be either
       an array of field names or an object where each key represents a field name
       and each value represents the new updated value for the field (providing
       updated values is a performance optimization).
@@ -274,7 +274,7 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   // This will cause the resource cache to clear itself.
   self.publish(resourceChannelName);
 
-  var updatedFields = updateDetails.updatedFields || [];
+  var updatedFields = updateDetails.fields || [];
   if (Array.isArray(updatedFields)) {
     updatedFields.forEach(function (fieldName) {
       var resourcePropertyChannelName = self._getResourcePropertyChannelName({
@@ -363,14 +363,14 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   this.notifyResourceUpdate({
     type: updateDetails.type,
     id: refResource.id,
-    updatedFields: updatedFieldsList
+    fields: updatedFieldsList
   });
 
   var oldViewParams = {};
   var oldResourceAffectedViews = this.getAffectedViews({
     type: updateDetails.type,
     resource: oldResource,
-    updatedFields: updatedFieldsList
+    fields: updatedFieldsList
   });
   oldResourceAffectedViews.forEach(function (viewData) {
     oldViewParams[viewData.view] = viewData.params;
@@ -384,7 +384,7 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   var newResourceAffectedViews = this.getAffectedViews({
     type: updateDetails.type,
     resource: newResource,
-    updatedFields: updatedFieldsList
+    fields: updatedFieldsList
   });
   newResourceAffectedViews.forEach(function (viewData) {
     if (!self._areViewParamsEqual(oldViewParams[viewData.view], viewData.params)) {
