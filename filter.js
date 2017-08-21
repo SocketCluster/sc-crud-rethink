@@ -84,6 +84,12 @@ var Filter = function (scServer, options) {
       next();
       return;
     }
+    // Sometimes the real viewParams may be different from what can be parsed from
+    // the channel name; this is because some view params don't affect the real-time
+    // delivery of messages but they may still be useful in constructing the view.
+    if (channelResourceQuery.view !== undefined && req.data && typeof req.data.viewParams == 'object') {
+      channelResourceQuery.viewParams = req.data.viewParams;
+    }
 
     var continueWithPostFilter = function () {
       var subscribePostRequest = {
