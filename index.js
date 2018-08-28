@@ -679,9 +679,9 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
             var oldOffsetData = oldViewOffsets[viewName] || {};
             newOffsetData = newOffsetData || {};
 
-            if (oldOffsetData.offset != newOffsetData.offset) {
-              var areViewParamsEqual = self._areViewParamsEqual(oldOffsetData.viewParams, newOffsetData.viewParams);
-              if (areViewParamsEqual) {
+            var areViewParamsEqual = self._areViewParamsEqual(oldOffsetData.viewParams, newOffsetData.viewParams);
+            if (areViewParamsEqual) {
+              if (oldOffsetData.offset != newOffsetData.offset) {
                 if (self._isWithinRealtimeBounds(oldOffsetData.offset) || self._isWithinRealtimeBounds(newOffsetData.offset)) {
                   self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
                     type: 'update',
@@ -691,23 +691,23 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
                     newOffset: newOffsetData.offset
                   });
                 }
-              } else {
-                if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                  self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
-                    type: 'update',
-                    action: 'remove',
-                    id: query.id,
-                    offset: oldOffsetData.offset
-                  });
-                }
-                if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
-                    type: 'update',
-                    action: 'add',
-                    id: query.id,
-                    offset: newOffsetData.offset
-                  });
-                }
+              }
+            } else {
+              if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
+                self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
+                  type: 'update',
+                  action: 'remove',
+                  id: query.id,
+                  offset: oldOffsetData.offset
+                });
+              }
+              if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
+                self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
+                  type: 'update',
+                  action: 'add',
+                  id: query.id,
+                  offset: newOffsetData.offset
+                });
               }
             }
           });
