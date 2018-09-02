@@ -1,4 +1,3 @@
-var _ = require('lodash');
 var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
 var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 

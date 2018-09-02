@@ -1,4 +1,3 @@
-var _ = require('lodash');
 var EventEmitter = require('events').EventEmitter;
 
 var Cache = function (options) {
@@ -130,8 +129,9 @@ Cache.prototype.pass = function (query, provider, callback) {
         var freshCacheEntry = self._cache[resourcePath];
 
         if (freshCacheEntry) {
-          _.forOwn(freshCacheEntry.patch, function (value, field) {
-            data[field] = value;
+          var cacheEntryPatch = freshCacheEntry.patch || {};
+          Object.keys(cacheEntryPatch).forEach(function (field) {
+            data[field] = cacheEntryPatch[field];
           });
         }
 
