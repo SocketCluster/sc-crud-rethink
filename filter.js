@@ -9,6 +9,7 @@ var Filter = function (scServer, options) {
   this.schema = this.options.schema || {};
   this.thinky = this.options.thinky;
   this.cache = this.options.cache;
+  this.scServer = scServer;
 
   this._getModelFilter = function (modelType, filterPhase) {
     var modelSchema = self.schema[modelType];
@@ -135,6 +136,8 @@ var Filter = function (scServer, options) {
 };
 
 Filter.prototype.applyPostFilter = function (req, next) {
+  var self = this;
+
   var query = req.query;
   var postFilter = this._getModelFilter(query.type, 'post');
 
@@ -178,7 +181,8 @@ Filter.prototype.applyPostFilter = function (req, next) {
 
       var queryResponseHandler = function (err, resource) {
         if (err) {
-          next(err);
+          self.scServer.emit('warning', err);
+          next(new Error('Executed an invalid query transformation'));
         } else {
           request.resource = resource;
           continueWithPostFilter();
