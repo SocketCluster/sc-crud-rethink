@@ -3,20 +3,19 @@ var getViewMetaData = function (options, type, viewName) {
   var modelViews = typeSchema.views || {};
   var viewSchema = modelViews[viewName] || {};
 
-  return {
-    transform: viewSchema.transform
-  };
+  return Object.assign({}, viewSchema);
 };
 
 module.exports.constructTransformedRethinkQuery = function (options, ModelClass, type, viewName, viewParams) {
   var viewMetaData = getViewMetaData(options, type, viewName);
   var rethinkQuery = ModelClass;
 
-  var sanitizedViewParams;
-  if (typeof viewParams != 'object') {
-    sanitizedViewParams = {};
-  } else {
-    sanitizedViewParams = viewParams;
+  var sanitizedViewParams = {};
+  if (typeof viewParams === 'object' && viewParams != null) {
+    (viewMetaData.paramFields || []).forEach((field) => {
+      var value = viewParams[field];
+      sanitizedViewParams[field] = value === undefined ? null : value;
+    });
   }
 
   var transformFn = viewMetaData.transform;
