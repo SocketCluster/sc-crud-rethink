@@ -428,8 +428,10 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
 SCCRUDRethink.prototype.create = function (query, callback, socket) {
   var self = this;
 
-  if (!query) {
-    query = {};
+  var validationError = this._validateQuery(query);
+  if (validationError) {
+    callback && callback(validationError);
+    return;
   }
 
   var ModelClass = this.models[query.type];
@@ -508,8 +510,10 @@ SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceCh
 SCCRUDRethink.prototype.read = function (query, callback, socket) {
   var self = this;
 
-  if (!query) {
-    query = {};
+  var validationError = this._validateQuery(query);
+  if (validationError) {
+    callback && callback(validationError);
+    return;
   }
 
   var pageSize = query.pageSize || this.options.defaultPageSize;
@@ -677,8 +681,10 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
 SCCRUDRethink.prototype.update = function (query, callback, socket) {
   var self = this;
 
-  if (!query) {
-    query = {};
+  var validationError = this._validateQuery(query);
+  if (validationError) {
+    callback && callback(validationError);
+    return;
   }
 
   var savedHandler = function (err, oldViewOffsets, queryResult) {
@@ -858,8 +864,10 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
 SCCRUDRethink.prototype.delete = function (query, callback, socket) {
   var self = this;
 
-  if (!query) {
-    query = {};
+  var validationError = this._validateQuery(query);
+  if (validationError) {
+    callback && callback(validationError);
+    return;
   }
 
   var deletedHandler = function (err, viewOffsets, result) {
@@ -991,6 +999,96 @@ SCCRUDRethink.prototype._attachSocket = function (socket) {
   socket.on('delete', function (query, callback) {
     self.delete(query, callback, socket);
   });
+};
+
+SCCRUDRethink.prototype._validateRequiredViewParams = function (viewParams) {
+  if (viewParams === undefined || viewParams === null) {
+    return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} expects viewParams but it was null or undefined`);
+  }
+  var viewParamsType = typeof viewParams;
+  if (viewParamsType !== 'object') {
+    return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} expects viewParams to be an object instead of ${viewParamsType}`);
+  }
+  return null;
+};
+
+SCCRUDRethink.prototype._validateViewQuery = function (query) {
+  var viewSchema = this._getView(query.type, query.view);
+  if (!viewSchema) {
+    return new Error(`Invalid view query - The view ${query.view} was not defined in the schema under the type ${query.type}`);
+  }
+  if (viewSchema.paramFields && viewSchema.paramFields.length > 0) {
+    var viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
+    if (viewParamsFormatError) {
+      return viewParamsFormatError;
+    }
+    var missingFields = [];
+    viewSchema.paramFields.forEach((field) => {
+      if (query.viewParams[field] === undefined) {
+        missingFields.push(field);
+      }
+    });
+    if (missingFields.length > 0) {
+      return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} requires additional fields to meet paramFields requirements. Missing: ${missingFields.join(', ')}`);
+    }
+  }
+  if (viewSchema.primaryKeys && viewSchema.primaryKeys.length > 0) {
+    var viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
+    if (viewParamsFormatError) {
+      return viewParamsFormatError;
+    }
+    var missingFields = [];
+    viewSchema.primaryKeys.forEach((field) => {
+      if (query.viewParams[field] === undefined) {
+        missingFields.push(field);
+      }
+    });
+    if (missingFields.length > 0) {
+      return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} requires additional fields to meet primaryKeys requirements. Missing: ${missingFields.join(', ')}`);
+    }
+  }
+  return null;
+};
+
+SCCRUDRethink.prototype._validateQuery = function (query) {
+  if (query === undefined || query === null) {
+    return new Error(`Invalid query - The query was null or undefined`);
+  }
+  var queryType = typeof query;
+  if (queryType !== 'object') {
+    return new Error(`Invalid query - The query must be an object instead of ${queryType}`);
+  }
+  if (query.type === undefined || query.type === null) {
+    return new Error('Invalid query - The query type cannot be null or undefined');
+  }
+  if (!this.schema[query.type]) {
+    return new Error(`Invalid query - The query type ${query.type} was not defined on the schema`);
+  }
+  var fieldIsSet = query.field !== undefined && query.field !== null;
+  var idIsSet = query.id !== undefined && query.id !== null;
+  if (fieldIsSet) {
+    var fieldType = typeof query.field;
+    if (fieldType !== 'string' && fieldType !== 'number') {
+      return new Error(`Invalid field query - The field property must be a string or number instead of ${fieldType}`);
+    }
+    if (!idIsSet) {
+      return new Error(`Invalid field query - The query must have an id property`);
+    }
+  }
+  if (idIsSet) {
+    var idType = typeof query.id;
+    if (idType !== 'string') {
+      return new Error(`Invalid resource query - The resource id must be a string instead of ${idType}`);
+    }
+  }
+  var viewIsSet = query.view !== undefined && query.view !== null;
+  if (viewIsSet) {
+    var viewQueryError = this._validateViewQuery(query);
+    if (viewQueryError) {
+      return viewQueryError;
+    }
+  }
+  return null;
 };
 
 module.exports.thinky = thinky;
