@@ -8,16 +8,23 @@ var constructTransformedRethinkQuery = require('./query-transformer').constructT
 var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
 var SCCRUDRethink = function (options) {
+  var self = this;
   EventEmitter.call(this);
 
-  var self = this;
+  this.options = Object.assign({}, options);
 
-  this.options = options || {};
+  if (!this.options.logger) {
+    this.options.logger = console;
+  }
+  if (!this.options.schema) {
+    this.options.schema = {};
+  }
 
   this.models = {};
-  this.schema = this.options.schema || {};
+  this.schema = this.options.schema;
   this.thinky = thinky(this.options.thinkyOptions);
   this.options.thinky = this.thinky;
+  this.logger = this.options.logger;
 
   this.channelPrefix = 'crud>';
 
@@ -582,7 +589,16 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
   } else {
     if (query.id) {
       var dataProvider = function (cb) {
-        ModelClass.get(query.id).run(cb);
+        ModelClass.get(query.id).run(function (err, data) {
+          var error;
+          if (err) {
+            self.logger.error(err);
+            error = new Error(`Failed to get resource with id ${query.id} from the database`);
+          } else {
+            error = null;
+          }
+          cb(error, data);
+        });
       };
       var resourceChannelName = self._getResourceChannelName(query);
 
