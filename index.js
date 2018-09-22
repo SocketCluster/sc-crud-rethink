@@ -102,6 +102,11 @@ SCCRUDRethink.prototype._isValidView = function (type, viewName) {
   return modelViews.hasOwnProperty(viewName);
 };
 
+SCCRUDRethink.prototype._getView = function (type, viewName) {
+  var modelViews = this._getViews(type);
+  return modelViews[viewName];
+};
+
 // Find the offset index of a document within each of its affected views.
 // Later, we can use this information to determine how a change to a document's
 // property affects each view within the overall system.
@@ -166,8 +171,21 @@ SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
 };
 
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, type) {
-  var viewParamsString = jsonStableStringify(viewParams || {});
-  return this.channelPrefix + viewName + '(' + viewParamsString + '):' + type;
+  var primaryParams;
+  var viewSchema = this._getView(type, viewName);
+
+  if (viewSchema && viewSchema.primaryKeys) {
+    primaryParams = {};
+
+    viewSchema.primaryKeys.forEach(function (field) {
+      primaryParams[field] = viewParams[field] === undefined ? null : viewParams[field];
+    });
+  } else {
+    primaryParams = viewParams || {};
+  }
+
+  var viewPrimaryParamsString = jsonStableStringify(primaryParams);
+  return this.channelPrefix + viewName + '(' + viewPrimaryParamsString + '):' + type;
 };
 
 SCCRUDRethink.prototype._areViewParamsEqual = function (viewParamsA, viewParamsB) {
@@ -385,6 +403,7 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
     resource: newResource,
     fields: updatedFieldsList
   });
+
   newResourceAffectedViews.forEach(function (viewData) {
     if (!self._areViewParamsEqual(oldViewParams[viewData.view], viewData.params)) {
       self.notifyViewUpdate({
