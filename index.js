@@ -656,9 +656,12 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
 
       async.parallel(tasks, function (err, results) {
         if (err) {
-          loadedHandler(err);
+          var error = new Error(`Failed to generate view ${query.view} for type ${query.type} with viewParams ${JSON.stringify(query.viewParams)}`);
+          self.logger.error(err);
+          self.logger.error(error);
+          loadedHandler(error);
         } else {
-          loadedHandler(err, results[0], results[1]);
+          loadedHandler(null, results[0], results[1]);
         }
       });
     }
