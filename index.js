@@ -242,13 +242,34 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   The updateDetails argument must be an object with the following properties:
     type: The resource type which was updated (name of the collection).
     id: The id of the specific resource/document which was updated.
-    fields (optional): Fields which were updated within the resource - Can be either
+    fields: Fields which were updated within the resource - Can be either
       an array of field names or an object where each key represents a field name
       and each value represents the new updated value for the field (providing
       updated values is a performance optimization).
 */
 SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   var self = this;
+
+  if (updateDetails == null) {
+    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.type === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.id === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have an id property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.fields === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a fields property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
 
   var resourceChannelName = self._getResourceChannelName(updateDetails);
   // This will cause the resource cache to clear itself.
@@ -287,11 +308,31 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   about the change.
 
   The updateDetails argument must be an object with the following properties:
+    type: The resource type which was updated (name of the collection).
     view: The name of the view.
     params: The predicate object/value which defines the affected view.
-    type: The resource type which was updated (name of the collection).
 */
 SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
+  if (updateDetails == null) {
+    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.type === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.view === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a view property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.params === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a params property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
   var viewChannelName = this._getViewChannelName(
     updateDetails.view,
     updateDetails.params,
@@ -316,6 +357,22 @@ SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
 */
 SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   var self = this;
+
+  if (updateDetails == null) {
+    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.type === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
+  if (updateDetails.oldResource === undefined && updateDetails.newResource === undefined) {
+    var invalidArgumentsError = new Error('The updateDetails object did not have either an oldResource or newResource property');
+    invalidArgumentsError.name = 'InvalidArgumentsError';
+    throw invalidArgumentsError;
+  }
 
   var refResource = updateDetails.oldResource || updateDetails.newResource || {};
   var oldResource = updateDetails.oldResource || {};
