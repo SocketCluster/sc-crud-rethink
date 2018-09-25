@@ -25,7 +25,7 @@ var Filter = function (scServer, options) {
   };
 
   scServer.addMiddleware(scServer.MIDDLEWARE_EMIT, function (req, next) {
-    if (req.event == 'create' || req.event == 'read' || req.event == 'update' || req.event == 'delete') {
+    if (req.event === 'create' || req.event === 'read' || req.event === 'update' || req.event === 'delete') {
       // If socket has a valid auth token, then allow emitting get or set events
       var authToken = req.socket.authToken;
 
@@ -40,7 +40,7 @@ var Filter = function (scServer, options) {
         };
         preFilter(crudRequest, function (err) {
           if (err) {
-            if (typeof err == 'boolean') {
+            if (typeof err === 'boolean') {
               err = new Error('You are not permitted to perform a CRUD operation on the ' + req.data.type + ' resource with ID ' + req.data.id);
               err.name = 'CRUDBlockedError';
               err.type = 'pre';
@@ -88,7 +88,7 @@ var Filter = function (scServer, options) {
     // Sometimes the real viewParams may be different from what can be parsed from
     // the channel name; this is because some view params don't affect the real-time
     // delivery of messages but they may still be useful in constructing the view.
-    if (channelResourceQuery.view !== undefined && req.data && typeof req.data.viewParams == 'object') {
+    if (channelResourceQuery.view !== undefined && req.data && typeof req.data.viewParams === 'object') {
       channelResourceQuery.viewParams = req.data.viewParams;
     }
 
@@ -113,7 +113,7 @@ var Filter = function (scServer, options) {
       };
       preFilter(subscribePreRequest, function (err) {
         if (err) {
-          if (typeof err == 'boolean') {
+          if (typeof err === 'boolean') {
             err = new Error('Cannot subscribe to ' + req.channel + ' channel');
             err.name = 'CRUDBlockedError';
             err.type = 'pre';
@@ -157,7 +157,7 @@ Filter.prototype.applyPostFilter = function (req, next) {
     var continueWithPostFilter = function () {
       postFilter(request, function (err) {
         if (err) {
-          if (typeof err == 'boolean') {
+          if (typeof err === 'boolean') {
             err = new Error('You are not permitted to perform a CRUD operation on the ' + query.type + ' resource with ID ' + query.id);
             err.name = 'CRUDBlockedError';
             err.type = 'post';

@@ -148,12 +148,12 @@ Cache.prototype.pass = function (query, provider, callback) {
 };
 
 Cache.prototype.update = function (resourceChannelString, data) {
-  if (!data || data.type != 'update' || !data.hasOwnProperty('value')) {
+  if (!data || data.type !== 'update' || !data.hasOwnProperty('value')) {
     return;
   }
   var parts = resourceChannelString.split('>');
   var crudString = parts[0];
-  if (crudString != 'crud') {
+  if (crudString !== 'crud') {
     return;
   }
   var resourceChannel = parts[1];

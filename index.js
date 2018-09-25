@@ -114,69 +114,6 @@ SCCRUDRethink.prototype._getView = function (type, viewName) {
   return modelViews[viewName];
 };
 
-// Find the offset index of a document within each of its affected views.
-// Later, we can use this information to determine how a change to a document's
-// property affects each view within the overall system.
-SCCRUDRethink.prototype._getDocumentViewOffsets = function (document, query, callback) {
-  var self = this;
-  var ModelClass = this.models[query.type];
-
-  if (ModelClass) {
-    var tasks = [];
-
-    var changeSettings = {
-      type: query.type,
-      resource: document
-    };
-    if (query.field) {
-      changeSettings.fields = [query.field];
-    }
-
-    var affectedViewSchemaMap = this.getAffectedViews(changeSettings);
-
-    affectedViewSchemaMap.forEach(function (viewData) {
-      var viewName = viewData.view;
-      var viewParams = viewData.params;
-
-      tasks.push(function (cb) {
-        var rethinkQuery = constructTransformedRethinkQuery(self.options, ModelClass, query.type, viewName, document);
-
-        // On an indexed result set, offsetsOf time complexity should be O(1).
-        rethinkQuery.offsetsOf(self.thinky.r.row('id').eq(document.id)).execute(function (err, documentOffsets) {
-          if (err) {
-            cb(err);
-          } else {
-            cb(null, {
-              view: viewName,
-              id: document.id,
-              viewParams: viewParams,
-              offset: (documentOffsets && documentOffsets.length) ? documentOffsets[0] : null
-            });
-          }
-        });
-      });
-    });
-
-    async.parallel(tasks, function (err, results) {
-      var viewOffsetMap = {};
-      if (err) {
-        self.emit('warning', err);
-      } else {
-        results.forEach(function (viewOffset) {
-          if (viewOffset != null) {
-            viewOffsetMap[viewOffset.view] = viewOffset;
-          }
-        });
-      }
-      callback(err, viewOffsetMap);
-    });
-  }
-};
-
-SCCRUDRethink.prototype._isWithinRealtimeBounds = function (offset) {
-  return this.options.maximumRealtimeOffset == null || offset <= this.options.maximumRealtimeOffset;
-};
-
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, type) {
   var primaryParams;
   var viewSchema = this._getView(type, viewName);
@@ -195,10 +132,10 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, ty
   return this.channelPrefix + viewName + '(' + viewPrimaryParamsString + '):' + type;
 };
 
-SCCRUDRethink.prototype._areViewParamsEqual = function (viewParamsA, viewParamsB) {
-  var viewParamsStringA = jsonStableStringify(viewParamsA || {});
-  var viewParamsStringB = jsonStableStringify(viewParamsB || {});
-  return viewParamsStringA == viewParamsStringB;
+SCCRUDRethink.prototype._areObjectsEqual = function (objectA, objectB) {
+  var objectStringA = jsonStableStringify(objectA || {});
+  var objectStringB = jsonStableStringify(objectB || {});
+  return objectStringA === objectStringB;
 };
 
 SCCRUDRethink.prototype.getModifiedResourceFields = function (updateDetails) {
@@ -220,6 +157,17 @@ SCCRUDRethink.prototype.getModifiedResourceFields = function (updateDetails) {
   return modifiedFieldsMap;
 };
 
+SCCRUDRethink.prototype.getQueryAffectedViews = function (query, resource) {
+  var updateDetails = {
+    type: query.type,
+    resource: resource
+  };
+  if (query.field) {
+    updateDetails.fields = [query.field];
+  }
+  return this.getAffectedViews(updateDetails);
+};
+
 SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   var self = this;
 
@@ -231,15 +179,20 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
   Object.keys(viewSchemaMap).forEach(function (viewName) {
     var viewSchema = viewSchemaMap[viewName];
     var paramFields = viewSchema.paramFields || [];
+    var affectingFields = viewSchema.affectingFields || [];
 
-    var viewParams = {};
+    var params = {};
+    var affectingData = {};
     paramFields.forEach(function (fieldName) {
-      viewParams[fieldName] = resource[fieldName];
+      params[fieldName] = resource[fieldName];
+      affectingData[fieldName] = resource[fieldName];
+    });
+    affectingFields.forEach(function (fieldName) {
+      affectingData[fieldName] = resource[fieldName];
     });
 
     if (updateDetails.fields) {
       var updatedFields = updateDetails.fields;
-      var affectingFields = viewSchema.affectingFields || [];
       var isViewAffectedByUpdate = false;
 
       var affectingFieldsLookup = {
@@ -265,14 +218,16 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
         affectedViews.push({
           view: viewName,
           type: updateDetails.type,
-          params: viewParams
+          params: params,
+          affectingData: affectingData
         });
       }
     } else {
       affectedViews.push({
         view: viewName,
         type: updateDetails.type,
-        params: viewParams
+        params: params,
+        affectingData: affectingData
       });
     }
   });
@@ -335,25 +290,14 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
     view: The name of the view.
     params: The predicate object/value which defines the affected view.
     type: The resource type which was updated (name of the collection).
-    offsets (optional): An array of affected indexes within the view which
-    were affected by the update (this is for performance optimization).
 */
 SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
-  var self = this;
-
-  var viewChannelName = self._getViewChannelName(
+  var viewChannelName = this._getViewChannelName(
     updateDetails.view,
     updateDetails.params,
     updateDetails.type
   );
-  var offsets = updateDetails.offsets || [];
-  if (offsets.length) {
-    offsets.forEach(function (offset) {
-      self.publish(viewChannelName, {offset: offset});
-    });
-  } else {
-    self.publish(viewChannelName);
-  }
+  this.publish(viewChannelName);
 };
 
 /*
@@ -390,14 +334,15 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
     fields: updatedFieldsList
   });
 
-  var oldViewParams = {};
+  var oldViewParamsMap = {};
   var oldResourceAffectedViews = this.getAffectedViews({
     type: updateDetails.type,
     resource: oldResource,
     fields: updatedFieldsList
   });
+
   oldResourceAffectedViews.forEach(function (viewData) {
-    oldViewParams[viewData.view] = viewData.params;
+    oldViewParamsMap[viewData.view] = viewData.params;
     self.notifyViewUpdate({
       type: viewData.type,
       view: viewData.view,
@@ -412,7 +357,7 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   });
 
   newResourceAffectedViews.forEach(function (viewData) {
-    if (!self._areViewParamsEqual(oldViewParams[viewData.view], viewData.params)) {
+    if (!self._areObjectsEqual(oldViewParamsMap[viewData.view], viewData.params)) {
       self.notifyViewUpdate({
         type: viewData.type,
         view: viewData.view,
@@ -446,22 +391,14 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
       });
       self.publish(resourceChannelName);
 
-      self._getDocumentViewOffsets(result, query, function (err, viewOffsets) {
-        if (err) {
-          self.emit('warning', err);
-        } else {
-          Object.keys(viewOffsets).forEach(function (viewName) {
-            var offsetData = viewOffsets[viewName];
-            if (self._isWithinRealtimeBounds(offsetData.offset)) {
-              self.publish(self._getViewChannelName(viewName, offsetData.viewParams, query.type), {
-                type: 'create',
-                id: result.id,
-                offset: offsetData.offset
-              });
-            }
-          });
-        }
+      var affectedViewData = self.getQueryAffectedViews(query, result);
+      affectedViewData.forEach(function (viewData) {
+        self.publish(self._getViewChannelName(viewData.view, viewData.params, query.type), {
+          type: 'create',
+          id: result.id
+        });
       });
+
       callback && callback(err, result.id);
     }
   };
@@ -470,7 +407,7 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
     var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
     error.name = 'CRUDInvalidModelType';
     savedHandler(error);
-  } if (typeof query.value == 'object') {
+  } if (typeof query.value === 'object') {
     var instance = new ModelClass(query.value);
     instance.save(savedHandler);
   } else {
@@ -687,7 +624,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     return;
   }
 
-  var savedHandler = function (err, oldViewOffsets, queryResult) {
+  var savedHandler = function (err, oldAffectedViewData, result) {
     if (err) {
       self.emit('warning', err);
     } else {
@@ -717,45 +654,37 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
 
-      self._getDocumentViewOffsets(queryResult, query, function (err, newViewOffsets) {
-        if (err) {
-          self.emit('warning', err);
-        } else {
-          Object.keys(newViewOffsets).forEach(function (viewName) {
-            var newOffsetData = newViewOffsets[viewName] || {};
-            var oldOffsetData = oldViewOffsets[viewName] || {};
+      var oldViewDataMap = {};
+      oldAffectedViewData.forEach(function (viewData) {
+        oldViewDataMap[viewData.view] = viewData;
+      });
 
-            var areViewParamsEqual = self._areViewParamsEqual(oldOffsetData.viewParams, newOffsetData.viewParams);
-            if (areViewParamsEqual) {
-              if (oldOffsetData.offset != newOffsetData.offset) {
-                if (self._isWithinRealtimeBounds(oldOffsetData.offset) || self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                  self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
-                    type: 'update',
-                    action: 'move',
-                    id: query.id,
-                    oldOffset: oldOffsetData.offset,
-                    newOffset: newOffsetData.offset
-                  });
-                }
-              }
-            } else {
-              if (self._isWithinRealtimeBounds(oldOffsetData.offset)) {
-                self.publish(self._getViewChannelName(viewName, oldOffsetData.viewParams, query.type), {
-                  type: 'update',
-                  action: 'remove',
-                  id: query.id,
-                  offset: oldOffsetData.offset
-                });
-              }
-              if (self._isWithinRealtimeBounds(newOffsetData.offset)) {
-                self.publish(self._getViewChannelName(viewName, newOffsetData.viewParams, query.type), {
-                  type: 'update',
-                  action: 'add',
-                  id: query.id,
-                  offset: newOffsetData.offset
-                });
-              }
-            }
+      var newAffectedViewData = self.getQueryAffectedViews(query, result);
+
+      newAffectedViewData.forEach(function (viewData) {
+        var oldViewData = oldViewDataMap[viewData.view] || {};
+        var areViewParamsEqual = self._areObjectsEqual(oldViewData.params, viewData.params);
+
+        if (areViewParamsEqual) {
+          var areAffectingDataEqual = self._areObjectsEqual(oldViewData.affectingData, viewData.affectingData);
+
+          if (!areAffectingDataEqual) {
+            self.publish(self._getViewChannelName(viewData.view, viewData.params, query.type), {
+              type: 'update',
+              action: 'move',
+              id: query.id
+            });
+          }
+        } else {
+          self.publish(self._getViewChannelName(viewData.view, oldViewData.params, query.type), {
+            type: 'update',
+            action: 'remove',
+            id: query.id
+          });
+          self.publish(self._getViewChannelName(viewData.view, viewData.params, query.type), {
+            type: 'update',
+            action: 'add',
+            id: query.id
           });
         }
       });
@@ -795,20 +724,21 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     };
 
     var modelInstance;
-    var loadModelInstanceAndGetViewOffsets = function (cb) {
+    var loadModelInstanceAndGetViewData = function (cb) {
       ModelClass.get(query.id).run().then(function (instance) {
         modelInstance = instance;
-        self._getDocumentViewOffsets(modelInstance, query, cb);
+        var oldAffectedViewData = self.getQueryAffectedViews(query, modelInstance);
+        cb(null, oldAffectedViewData);
       }).error(cb);
     };
 
     if (query.field) {
-      if (query.field == 'id') {
+      if (query.field === 'id') {
         var error = new Error('Cannot modify the id field of an existing document');
         error.name = 'CRUDInvalidOperation';
         savedHandler(error);
       } else {
-        tasks.push(loadModelInstanceAndGetViewOffsets);
+        tasks.push(loadModelInstanceAndGetViewData);
 
         tasks.push(function (cb) {
           filterRequest.resource = modelInstance;
@@ -823,8 +753,8 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
     } else {
-      if (typeof query.value == 'object') {
-        tasks.push(loadModelInstanceAndGetViewOffsets);
+      if (typeof query.value === 'object') {
+        tasks.push(loadModelInstanceAndGetViewData);
 
         tasks.push(function (cb) {
           filterRequest.resource = modelInstance;
@@ -870,7 +800,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
     return;
   }
 
-  var deletedHandler = function (err, viewOffsets, result) {
+  var deletedHandler = function (err, oldAffectedViewData, result) {
     if (err) {
       self.emit('warning', err);
     } else {
@@ -892,16 +822,11 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
           });
         });
 
-        viewOffsets = viewOffsets || {};
-        Object.keys(viewOffsets).forEach(function (viewName) {
-          var offsetData = viewOffsets[viewName];
-          if (self._isWithinRealtimeBounds(offsetData.offset)) {
-            self.publish(self._getViewChannelName(viewName, offsetData.viewParams, query.type), {
-              type: 'delete',
-              id: query.id,
-              offset: offsetData.offset
-            });
-          }
+        oldAffectedViewData.forEach(function (viewData) {
+          self.publish(self._getViewChannelName(viewData.view, viewData.params, query.type), {
+            type: 'delete',
+            id: query.id
+          });
         });
       }
     }
@@ -925,7 +850,8 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
       tasks.push(function (cb) {
         ModelClass.get(query.id).run().then(function (instance) {
           modelInstance = instance;
-          self._getDocumentViewOffsets(modelInstance, query, cb);
+          var oldAffectedViewData = self.getQueryAffectedViews(query, modelInstance);
+          cb(null, oldAffectedViewData);
         }).error(cb);
       });
 
@@ -1068,8 +994,8 @@ SCCRUDRethink.prototype._validateQuery = function (query) {
   var idIsSet = query.id !== undefined && query.id !== null;
   if (fieldIsSet) {
     var fieldType = typeof query.field;
-    if (fieldType !== 'string' && fieldType !== 'number') {
-      return new Error(`Invalid field query - The field property must be a string or number instead of ${fieldType}`);
+    if (fieldType !== 'string') {
+      return new Error(`Invalid field query - The field property must be a string instead of ${fieldType}`);
     }
     if (!idIsSet) {
       return new Error(`Invalid field query - The query must have an id property`);
