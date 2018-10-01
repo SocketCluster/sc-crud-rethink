@@ -1,14 +1,14 @@
-var channelViewParamsRegex = /^([^\(]*)\((.*)\):([^:]*)$/;
+let channelViewParamsRegex = /^([^\(]*)\((.*)\):([^:]*)$/;
 
 module.exports.parseChannelResourceQuery = function (channelName) {
-  var mainParts = channelName.split('>');
+  let mainParts = channelName.split('>');
   if (mainParts[0] === 'crud' && mainParts[1]) {
-    var resourceString = mainParts[1];
+    let resourceString = mainParts[1];
 
     if (resourceString.indexOf(':') !== -1) {
       // If resource is a view.
-      var viewMatches = resourceString.match(channelViewParamsRegex);
-      var viewResource = {
+      let viewMatches = resourceString.match(channelViewParamsRegex);
+      let viewResource = {
         view: viewMatches[1],
         type: viewMatches[3]
       }
@@ -19,8 +19,8 @@ module.exports.parseChannelResourceQuery = function (channelName) {
       return viewResource;
     } else {
       // If resource is a simple model.
-      var resourceParts = resourceString.split('/');
-      var modelResource = {
+      let resourceParts = resourceString.split('/');
+      let modelResource = {
         type: resourceParts[0]
       };
       if (resourceParts[1]) {

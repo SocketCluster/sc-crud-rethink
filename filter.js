@@ -1,7 +1,7 @@
-var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
-var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
+const constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
+const parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
-var Filter = function (scServer, options) {
+let Filter = function (scServer, options) {
   // Setup SocketCluster middleware for access control and filtering
 
   this.options = options || {};
@@ -12,11 +12,11 @@ var Filter = function (scServer, options) {
   this.logger = this.options.logger;
 
   this._getModelFilter = (modelType, filterPhase) => {
-    var modelSchema = this.schema[modelType];
+    let modelSchema = this.schema[modelType];
     if (!modelSchema) {
       return null;
     }
-    var modelFilters = modelSchema.filters;
+    let modelFilters = modelSchema.filters;
     if (!modelFilters) {
       return null;
     }
@@ -26,11 +26,11 @@ var Filter = function (scServer, options) {
   scServer.addMiddleware(scServer.MIDDLEWARE_EMIT, (req, next) => {
     if (req.event === 'create' || req.event === 'read' || req.event === 'update' || req.event === 'delete') {
       // If socket has a valid auth token, then allow emitting get or set events
-      var authToken = req.socket.authToken;
+      let authToken = req.socket.authToken;
 
-      var preFilter = this._getModelFilter(req.data.type, 'pre');
+      let preFilter = this._getModelFilter(req.data.type, 'pre');
       if (preFilter) {
-        var crudRequest = {
+        let crudRequest = {
           r: this.thinky.r,
           socket: req.socket,
           action: req.event,
@@ -51,7 +51,7 @@ var Filter = function (scServer, options) {
         });
       } else {
         if (this.options.blockPreByDefault) {
-          var crudBlockedError = new Error('You are not permitted to perform a CRUD operation on the ' + req.data.type + ' resource with ID ' + req.data.id + ' - No filters found');
+          let crudBlockedError = new Error('You are not permitted to perform a CRUD operation on the ' + req.data.type + ' resource with ID ' + req.data.id + ' - No filters found');
           crudBlockedError.name = 'CRUDBlockedError';
           crudBlockedError.type = 'pre';
           next(crudBlockedError);
@@ -66,10 +66,10 @@ var Filter = function (scServer, options) {
   });
 
   scServer.addMiddleware(scServer.MIDDLEWARE_PUBLISH_IN, (req, next) => {
-    var channelResourceQuery = parseChannelResourceQuery(req.channel);
+    let channelResourceQuery = parseChannelResourceQuery(req.channel);
     if (channelResourceQuery) {
       // Always block CRUD publish from outside clients.
-      var crudPublishNotAllowedError = new Error('Cannot publish to a CRUD resource channel');
+      let crudPublishNotAllowedError = new Error('Cannot publish to a CRUD resource channel');
       crudPublishNotAllowedError.name = 'CRUDPublishNotAllowedError';
       next(crudPublishNotAllowedError);
     } else {
@@ -78,8 +78,8 @@ var Filter = function (scServer, options) {
   });
 
   scServer.addMiddleware(scServer.MIDDLEWARE_SUBSCRIBE, (req, next) => {
-    var authToken = req.socket.authToken;
-    var channelResourceQuery = parseChannelResourceQuery(req.channel);
+    let authToken = req.socket.authToken;
+    let channelResourceQuery = parseChannelResourceQuery(req.channel);
     if (!channelResourceQuery) {
       next();
       return;
@@ -91,8 +91,8 @@ var Filter = function (scServer, options) {
       channelResourceQuery.viewParams = req.data.viewParams;
     }
 
-    var continueWithPostFilter = () => {
-      var subscribePostRequest = {
+    let continueWithPostFilter = () => {
+      let subscribePostRequest = {
         socket: req.socket,
         action: 'subscribe',
         query: channelResourceQuery,
@@ -101,9 +101,9 @@ var Filter = function (scServer, options) {
       this.applyPostFilter(subscribePostRequest, next);
     };
 
-    var preFilter = this._getModelFilter(channelResourceQuery.type, 'pre');
+    let preFilter = this._getModelFilter(channelResourceQuery.type, 'pre');
     if (preFilter) {
-      var subscribePreRequest = {
+      let subscribePreRequest = {
         r: this.thinky.r,
         socket: req.socket,
         action: 'subscribe',
@@ -124,7 +124,7 @@ var Filter = function (scServer, options) {
       });
     } else {
       if (this.options.blockPreByDefault) {
-        var crudBlockedError = new Error('Cannot subscribe to ' + req.channel + ' channel - No filters found');
+        let crudBlockedError = new Error('Cannot subscribe to ' + req.channel + ' channel - No filters found');
         crudBlockedError.name = 'CRUDBlockedError';
         crudBlockedError.type = 'pre';
         next(crudBlockedError);
@@ -136,11 +136,11 @@ var Filter = function (scServer, options) {
 };
 
 Filter.prototype.applyPostFilter = function (req, next) {
-  var query = req.query;
-  var postFilter = this._getModelFilter(query.type, 'post');
+  let query = req.query;
+  let postFilter = this._getModelFilter(query.type, 'post');
 
   if (postFilter) {
-    var request = {
+    let request = {
       r: this.thinky.r,
       socket: req.socket,
       action: req.action,
@@ -151,7 +151,7 @@ Filter.prototype.applyPostFilter = function (req, next) {
       request.resource = req.resource;
     }
 
-    var continueWithPostFilter = () => {
+    let continueWithPostFilter = () => {
       postFilter(request, (err) => {
         if (err) {
           if (typeof err === 'boolean') {
@@ -167,17 +167,17 @@ Filter.prototype.applyPostFilter = function (req, next) {
     };
 
     if (req.fetchResource) {
-      var pageSize = query.pageSize || this.options.defaultPageSize;
-      var ModelClass = this.options.models[query.type];
+      let pageSize = query.pageSize || this.options.defaultPageSize;
+      let ModelClass = this.options.models[query.type];
 
       if (!ModelClass) {
-        var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+        let error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
         error.name = 'CRUDInvalidModelType';
         next(error);
         return;
       }
 
-      var queryResponseHandler = (err, resource) => {
+      let queryResponseHandler = (err, resource) => {
         if (err) {
           this.logger.error(err);
           next(new Error('Executed an invalid query transformation'));
@@ -188,13 +188,13 @@ Filter.prototype.applyPostFilter = function (req, next) {
       };
 
       if (query.id) {
-        var dataProvider = (cb) => {
+        let dataProvider = (cb) => {
           ModelClass.get(query.id).run(cb);
         };
         this.cache.pass(query, dataProvider, queryResponseHandler);
       } else {
         // For collections.
-        var rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.viewParams);
+        let rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.viewParams);
         if (query.offset) {
           rethinkQuery = rethinkQuery.slice(query.offset, query.offset + pageSize);
         } else {
@@ -208,7 +208,7 @@ Filter.prototype.applyPostFilter = function (req, next) {
     }
   } else {
     if (this.options.blockPostByDefault) {
-      var crudBlockedError = new Error('You are not permitted to perform a CRUD operation on the ' + query.type + ' resource with ID ' + query.id + ' - No filters found');
+      let crudBlockedError = new Error('You are not permitted to perform a CRUD operation on the ' + query.type + ' resource with ID ' + query.id + ' - No filters found');
       crudBlockedError.name = 'CRUDBlockedError';
       crudBlockedError.type = 'post';
       next(crudBlockedError);

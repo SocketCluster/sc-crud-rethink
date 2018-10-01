@@ -1,13 +1,13 @@
-var thinky = require('thinky');
-var async = require('async');
-var Filter = require('./filter');
-var Cache = require('./cache');
-var EventEmitter = require('events').EventEmitter;
-var jsonStableStringify = require('json-stable-stringify');
-var constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
-var parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
+const thinky = require('thinky');
+const async = require('async');
+const Filter = require('./filter');
+const Cache = require('./cache');
+const EventEmitter = require('events').EventEmitter;
+const jsonStableStringify = require('json-stable-stringify');
+const constructTransformedRethinkQuery = require('./query-transformer').constructTransformedRethinkQuery;
+const parseChannelResourceQuery = require('./channel-resource-parser').parseChannelResourceQuery;
 
-var SCCRUDRethink = function (options) {
+let SCCRUDRethink = function (options) {
   EventEmitter.call(this);
 
   this.options = Object.assign({}, options);
@@ -32,12 +32,12 @@ var SCCRUDRethink = function (options) {
   }
 
   Object.keys(this.schema).forEach((modelName) => {
-    var modelSchema = this.schema[modelName];
+    let modelSchema = this.schema[modelName];
     this.models[modelName] = this.thinky.createModel(modelName, modelSchema.fields);
   });
   this.options.models = this.models;
 
-  var cacheDisabled;
+  let cacheDisabled;
   if (this.options.worker) {
     this.scServer = this.options.worker.scServer;
     cacheDisabled = this.options.cacheDisabled || false;
@@ -88,8 +88,8 @@ SCCRUDRethink.prototype._getResourcePropertyChannelName = function (resourceProp
 };
 
 SCCRUDRethink.prototype._cleanupResourceChannel = function (resource) {
-  var resourceChannelName = this._getResourceChannelName(resource);
-  var resourceChannel = this.scServer.exchange.channel(resourceChannelName);
+  let resourceChannelName = this._getResourceChannelName(resource);
+  let resourceChannel = this.scServer.exchange.channel(resourceChannelName);
   resourceChannel.unsubscribe();
   resourceChannel.destroy();
 };
@@ -99,23 +99,23 @@ SCCRUDRethink.prototype._handleResourceChange = function (resource) {
 };
 
 SCCRUDRethink.prototype._getViews = function (type) {
-  var typeSchema = this.schema[type] || {};
+  let typeSchema = this.schema[type] || {};
   return typeSchema.views || {};
 };
 
 SCCRUDRethink.prototype._isValidView = function (type, viewName) {
-  var modelViews = this._getViews(type);
+  let modelViews = this._getViews(type);
   return modelViews.hasOwnProperty(viewName);
 };
 
 SCCRUDRethink.prototype._getView = function (type, viewName) {
-  var modelViews = this._getViews(type);
+  let modelViews = this._getViews(type);
   return modelViews[viewName];
 };
 
 SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, type) {
-  var primaryParams;
-  var viewSchema = this._getView(type, viewName);
+  let primaryParams;
+  let viewSchema = this._getView(type, viewName);
 
   if (viewSchema && viewSchema.primaryKeys) {
     primaryParams = {};
@@ -127,20 +127,20 @@ SCCRUDRethink.prototype._getViewChannelName = function (viewName, viewParams, ty
     primaryParams = viewParams || {};
   }
 
-  var viewPrimaryParamsString = jsonStableStringify(primaryParams);
+  let viewPrimaryParamsString = jsonStableStringify(primaryParams);
   return this.channelPrefix + viewName + '(' + viewPrimaryParamsString + '):' + type;
 };
 
 SCCRUDRethink.prototype._areObjectsEqual = function (objectA, objectB) {
-  var objectStringA = jsonStableStringify(objectA || {});
-  var objectStringB = jsonStableStringify(objectB || {});
+  let objectStringA = jsonStableStringify(objectA || {});
+  let objectStringB = jsonStableStringify(objectB || {});
   return objectStringA === objectStringB;
 };
 
 SCCRUDRethink.prototype.getModifiedResourceFields = function (updateDetails) {
-  var oldResource = updateDetails.oldResource || {};
-  var newResource = updateDetails.newResource || {};
-  var modifiedFieldsMap = {};
+  let oldResource = updateDetails.oldResource || {};
+  let newResource = updateDetails.newResource || {};
+  let modifiedFieldsMap = {};
 
   Object.keys(oldResource).forEach((fieldName) => {
     if (oldResource[fieldName] !== newResource[fieldName]) {
@@ -157,7 +157,7 @@ SCCRUDRethink.prototype.getModifiedResourceFields = function (updateDetails) {
 };
 
 SCCRUDRethink.prototype.getQueryAffectedViews = function (query, resource) {
-  var updateDetails = {
+  let updateDetails = {
     type: query.type,
     resource: resource
   };
@@ -168,18 +168,18 @@ SCCRUDRethink.prototype.getQueryAffectedViews = function (query, resource) {
 };
 
 SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
-  var affectedViews = [];
-  var resource = updateDetails.resource || {};
+  let affectedViews = [];
+  let resource = updateDetails.resource || {};
 
-  var viewSchemaMap = this._getViews(updateDetails.type);
+  let viewSchemaMap = this._getViews(updateDetails.type);
 
   Object.keys(viewSchemaMap).forEach((viewName) => {
-    var viewSchema = viewSchemaMap[viewName];
-    var paramFields = viewSchema.paramFields || [];
-    var affectingFields = viewSchema.affectingFields || [];
+    let viewSchema = viewSchemaMap[viewName];
+    let paramFields = viewSchema.paramFields || [];
+    let affectingFields = viewSchema.affectingFields || [];
 
-    var params = {};
-    var affectingData = {};
+    let params = {};
+    let affectingData = {};
     paramFields.forEach((fieldName) => {
       params[fieldName] = resource[fieldName];
       affectingData[fieldName] = resource[fieldName];
@@ -189,10 +189,10 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
     });
 
     if (updateDetails.fields) {
-      var updatedFields = updateDetails.fields;
-      var isViewAffectedByUpdate = false;
+      let updatedFields = updateDetails.fields;
+      let isViewAffectedByUpdate = false;
 
-      var affectingFieldsLookup = {
+      let affectingFieldsLookup = {
         id: true
       };
       paramFields.forEach((fieldName) => {
@@ -202,9 +202,9 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
         affectingFieldsLookup[fieldName] = true;
       });
 
-      var modifiedFieldsLength = updatedFields.length;
-      for (var i = 0; i < modifiedFieldsLength; i++) {
-        var fieldName = updatedFields[i];
+      let modifiedFieldsLength = updatedFields.length;
+      for (let i = 0; i < modifiedFieldsLength; i++) {
+        let fieldName = updatedFields[i];
         if (affectingFieldsLookup[fieldName]) {
           isViewAffectedByUpdate = true;
           break;
@@ -246,34 +246,34 @@ SCCRUDRethink.prototype.getAffectedViews = function (updateDetails) {
 */
 SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   if (updateDetails == null) {
-    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    let invalidArgumentsError = new Error('The updateDetails object was not specified');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.type === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a type property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.id === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have an id property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have an id property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.fields === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a fields property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a fields property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
 
-  var resourceChannelName = this._getResourceChannelName(updateDetails);
+  let resourceChannelName = this._getResourceChannelName(updateDetails);
   // This will cause the resource cache to clear itself.
   this.publish(resourceChannelName);
 
-  var updatedFields = updateDetails.fields || [];
+  let updatedFields = updateDetails.fields || [];
   if (Array.isArray(updatedFields)) {
     updatedFields.forEach((fieldName) => {
-      var resourcePropertyChannelName = this._getResourcePropertyChannelName({
+      let resourcePropertyChannelName = this._getResourcePropertyChannelName({
         type: updateDetails.type,
         id: updateDetails.id,
         field: fieldName
@@ -284,7 +284,7 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
   } else {
     // Notify individual field subscribers about the change and provide the new value.
     Object.keys(updatedFields).forEach((fieldName) => {
-      var resourcePropertyChannelName = this._getResourcePropertyChannelName({
+      let resourcePropertyChannelName = this._getResourcePropertyChannelName({
         type: updateDetails.type,
         id: updateDetails.id,
         field: fieldName
@@ -309,26 +309,26 @@ SCCRUDRethink.prototype.notifyResourceUpdate = function (updateDetails) {
 */
 SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
   if (updateDetails == null) {
-    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    let invalidArgumentsError = new Error('The updateDetails object was not specified');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.type === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a type property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.view === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a view property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a view property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.params === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a params property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a params property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
-  var viewChannelName = this._getViewChannelName(
+  let viewChannelName = this._getViewChannelName(
     updateDetails.view,
     updateDetails.params,
     updateDetails.type
@@ -352,27 +352,27 @@ SCCRUDRethink.prototype.notifyViewUpdate = function (updateDetails) {
 */
 SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
   if (updateDetails == null) {
-    var invalidArgumentsError = new Error('The updateDetails object was not specified');
+    let invalidArgumentsError = new Error('The updateDetails object was not specified');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.type === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have a type property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have a type property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
   if (updateDetails.oldResource === undefined && updateDetails.newResource === undefined) {
-    var invalidArgumentsError = new Error('The updateDetails object did not have either an oldResource or newResource property');
+    let invalidArgumentsError = new Error('The updateDetails object did not have either an oldResource or newResource property');
     invalidArgumentsError.name = 'InvalidArgumentsError';
     throw invalidArgumentsError;
   }
 
-  var refResource = updateDetails.oldResource || updateDetails.newResource || {};
-  var oldResource = updateDetails.oldResource || {};
-  var newResource = updateDetails.newResource || {};
+  let refResource = updateDetails.oldResource || updateDetails.newResource || {};
+  let oldResource = updateDetails.oldResource || {};
+  let newResource = updateDetails.newResource || {};
 
-  var updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
-  var updatedFieldsList = Object.keys(updatedFieldsMap);
+  let updatedFieldsMap = this.getModifiedResourceFields(updateDetails);
+  let updatedFieldsList = Object.keys(updatedFieldsMap);
 
   if (!updatedFieldsList.length) {
     return;
@@ -384,8 +384,8 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
     fields: updatedFieldsList
   });
 
-  var oldViewParamsMap = {};
-  var oldResourceAffectedViews = this.getAffectedViews({
+  let oldViewParamsMap = {};
+  let oldResourceAffectedViews = this.getAffectedViews({
     type: updateDetails.type,
     resource: oldResource,
     fields: updatedFieldsList
@@ -400,7 +400,7 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
     });
   });
 
-  var newResourceAffectedViews = this.getAffectedViews({
+  let newResourceAffectedViews = this.getAffectedViews({
     type: updateDetails.type,
     resource: newResource,
     fields: updatedFieldsList
@@ -421,25 +421,25 @@ SCCRUDRethink.prototype.notifyUpdate = function (updateDetails) {
 // affected view (taking into account the affected page number within each view).
 // This allows views to update themselves on the front-end in real-time.
 SCCRUDRethink.prototype.create = function (query, callback, socket) {
-  var validationError = this._validateQuery(query);
+  let validationError = this._validateQuery(query);
   if (validationError) {
     callback && callback(validationError);
     return;
   }
 
-  var ModelClass = this.models[query.type];
+  let ModelClass = this.models[query.type];
 
-  var savedHandler = (err, result) => {
+  let savedHandler = (err, result) => {
     if (err) {
       callback && callback(err);
     } else {
-      var resourceChannelName = this._getResourceChannelName({
+      let resourceChannelName = this._getResourceChannelName({
         type: query.type,
         id: result.id
       });
       this.publish(resourceChannelName);
 
-      var affectedViewData = this.getQueryAffectedViews(query, result);
+      let affectedViewData = this.getQueryAffectedViews(query, result);
       affectedViewData.forEach((viewData) => {
         this.publish(this._getViewChannelName(viewData.view, viewData.params, query.type), {
           type: 'create',
@@ -452,14 +452,14 @@ SCCRUDRethink.prototype.create = function (query, callback, socket) {
   };
 
   if (ModelClass == null) {
-    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    let error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
     error.name = 'CRUDInvalidModelType';
     savedHandler(error);
   } if (typeof query.value === 'object') {
-    var instance = new ModelClass(query.value);
+    let instance = new ModelClass(query.value);
     instance.save(savedHandler);
   } else {
-    var error = new Error('Cannot create a document from a primitive - Must be an object');
+    let error = new Error('Cannot create a document from a primitive - Must be an object');
     error.name = 'CRUDInvalidParams';
     savedHandler(error);
   }
@@ -473,7 +473,7 @@ SCCRUDRethink.prototype._appendToResourceReadBuffer = function (resourceChannelN
 };
 
 SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceChannelName, query, dataProvider) {
-  var callbackList = this._resourceReadBuffer[resourceChannelName] || [];
+  let callbackList = this._resourceReadBuffer[resourceChannelName] || [];
   if (error) {
     callbackList.forEach((callback) => {
       callback(error);
@@ -491,21 +491,21 @@ SCCRUDRethink.prototype._processResourceReadBuffer = function (error, resourceCh
 // A cache entry will automatically get cleared when sc-crud-rethink detects
 // a real-time change to a field which is cached.
 SCCRUDRethink.prototype.read = function (query, callback, socket) {
-  var validationError = this._validateQuery(query);
+  let validationError = this._validateQuery(query);
   if (validationError) {
     callback && callback(validationError);
     return;
   }
 
-  var pageSize = query.pageSize || this.options.defaultPageSize;
+  let pageSize = query.pageSize || this.options.defaultPageSize;
 
-  var loadedHandler = (err, data, count) => {
+  let loadedHandler = (err, data, count) => {
     if (err) {
       callback && callback(err);
     } else {
       // If socket does not exist, then the CRUD operation comes from the server-side
       // and we don't need to pass it through a filter.
-      var applyPostFilter;
+      let applyPostFilter;
       if (socket && this.filter) {
         applyPostFilter = this.filter.applyPostFilter.bind(this.filter);
       } else {
@@ -513,7 +513,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
           next();
         };
       }
-      var filterRequest = {
+      let filterRequest = {
         r: this.thinky.r,
         socket: socket,
         action: 'read',
@@ -525,7 +525,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
         if (err) {
           callback && callback(err);
         } else {
-          var result;
+          let result;
           if (query.id) {
             if (query.field) {
               if (data == null) {
@@ -536,10 +536,10 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
               result = data;
             }
           } else {
-            var documentList = [];
-            var resultCount = Math.min(data.length, pageSize);
+            let documentList = [];
+            let resultCount = Math.min(data.length, pageSize);
 
-            for (var i = 0; i < resultCount; i++) {
+            for (let i = 0; i < resultCount; i++) {
               documentList.push(data[i].id || null);
             }
             result = {
@@ -566,16 +566,16 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
     }
   };
 
-  var ModelClass = this.models[query.type];
+  let ModelClass = this.models[query.type];
   if (ModelClass == null) {
-    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    let error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
     error.name = 'CRUDInvalidModelType';
     loadedHandler(error);
   } else {
     if (query.id) {
-      var dataProvider = (cb) => {
+      let dataProvider = (cb) => {
         ModelClass.get(query.id).run((err, data) => {
-          var error;
+          let error;
           if (err) {
             this.logger.error(err);
             error = new Error(`Failed to get resource with id ${query.id} from the database`);
@@ -585,11 +585,11 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
           cb(error, data);
         });
       };
-      var resourceChannelName = this._getResourceChannelName(query);
+      let resourceChannelName = this._getResourceChannelName(query);
 
-      var isSubscribedToResourceChannel = this.scServer.exchange.isSubscribed(resourceChannelName);
-      var isSubscribedToResourceChannelOrPending = this.scServer.exchange.isSubscribed(resourceChannelName, true);
-      var isSubcriptionPending = !isSubscribedToResourceChannel && isSubscribedToResourceChannelOrPending;
+      let isSubscribedToResourceChannel = this.scServer.exchange.isSubscribed(resourceChannelName);
+      let isSubscribedToResourceChannelOrPending = this.scServer.exchange.isSubscribed(resourceChannelName, true);
+      let isSubcriptionPending = !isSubscribedToResourceChannel && isSubscribedToResourceChannelOrPending;
 
       this._appendToResourceReadBuffer(resourceChannelName, loadedHandler);
 
@@ -600,26 +600,26 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
       } else if (!isSubcriptionPending) {
         // If there is no pending subscription, then we should create one and process the
         // buffer when we're subscribed.
-        var handleResourceSubscribe = () => {
+        let handleResourceSubscribe = () => {
           resourceChannel.removeListener('subscribeFail', handleResourceSubscribeFailure);
           this._processResourceReadBuffer(null, resourceChannelName, query, dataProvider);
         };
-        var handleResourceSubscribeFailure = (err) => {
+        let handleResourceSubscribeFailure = (err) => {
           resourceChannel.removeListener('subscribe', handleResourceSubscribe);
-          var error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
+          let error = new Error('Failed to subscribe to resource channel for the ' + query.type + ' model');
           error.name = 'FailedToSubscribeToResourceChannel';
           this._processResourceReadBuffer(error, resourceChannelName, query, dataProvider);
         };
 
-        var resourceChannel = this.scServer.exchange.subscribe(resourceChannelName);
+        let resourceChannel = this.scServer.exchange.subscribe(resourceChannelName);
         resourceChannel.once('subscribe', handleResourceSubscribe);
         resourceChannel.once('subscribeFail', handleResourceSubscribeFailure);
         resourceChannel.watch(this._handleResourceChange.bind(this, query));
       }
     } else {
-      var rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.viewParams);
+      let rethinkQuery = constructTransformedRethinkQuery(this.options, ModelClass, query.type, query.view, query.viewParams);
 
-      var tasks = [];
+      let tasks = [];
 
       if (query.offset) {
         tasks.push((cb) => {
@@ -641,7 +641,7 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
 
       async.parallel(tasks, (err, results) => {
         if (err) {
-          var error = new Error(`Failed to generate view ${query.view} for type ${query.type} with viewParams ${JSON.stringify(query.viewParams)}`);
+          let error = new Error(`Failed to generate view ${query.view} for type ${query.type} with viewParams ${JSON.stringify(query.viewParams)}`);
           this.logger.error(err);
           this.logger.error(error);
           loadedHandler(error);
@@ -660,21 +660,21 @@ SCCRUDRethink.prototype.read = function (query, callback, socket) {
 // has been affected by the update operation - This allows them to update
 // themselves in real-time.
 SCCRUDRethink.prototype.update = function (query, callback, socket) {
-  var validationError = this._validateQuery(query);
+  let validationError = this._validateQuery(query);
   if (validationError) {
     callback && callback(validationError);
     return;
   }
 
-  var savedHandler = (err, oldAffectedViewData, result) => {
+  let savedHandler = (err, oldAffectedViewData, result) => {
     if (err) {
       this.emit('warning', err);
     } else {
-      var resourceChannelName = this._getResourceChannelName(query);
+      let resourceChannelName = this._getResourceChannelName(query);
       this.publish(resourceChannelName);
 
       if (query.field) {
-        var cleanValue = query.value;
+        let cleanValue = query.value;
         if (cleanValue === undefined) {
           cleanValue = null;
         }
@@ -683,9 +683,9 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
           value: cleanValue
         });
       } else {
-        var queryValue = query.value || {};
+        let queryValue = query.value || {};
         Object.keys(queryValue).forEach((field) => {
-          var value = queryValue[field];
+          let value = queryValue[field];
           if (value === undefined) {
             value = null;
           }
@@ -696,19 +696,19 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
         });
       }
 
-      var oldViewDataMap = {};
+      let oldViewDataMap = {};
       oldAffectedViewData.forEach((viewData) => {
         oldViewDataMap[viewData.view] = viewData;
       });
 
-      var newAffectedViewData = this.getQueryAffectedViews(query, result);
+      let newAffectedViewData = this.getQueryAffectedViews(query, result);
 
       newAffectedViewData.forEach((viewData) => {
-        var oldViewData = oldViewDataMap[viewData.view] || {};
-        var areViewParamsEqual = this._areObjectsEqual(oldViewData.params, viewData.params);
+        let oldViewData = oldViewDataMap[viewData.view] || {};
+        let areViewParamsEqual = this._areObjectsEqual(oldViewData.params, viewData.params);
 
         if (areViewParamsEqual) {
-          var areAffectingDataEqual = this._areObjectsEqual(oldViewData.affectingData, viewData.affectingData);
+          let areAffectingDataEqual = this._areObjectsEqual(oldViewData.affectingData, viewData.affectingData);
 
           if (!areAffectingDataEqual) {
             this.publish(this._getViewChannelName(viewData.view, viewData.params, query.type), {
@@ -734,21 +734,21 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
     callback && callback(err);
   };
 
-  var ModelClass = this.models[query.type];
+  let ModelClass = this.models[query.type];
   if (ModelClass == null) {
-    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    let error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
     error.name = 'CRUDInvalidModelType';
     savedHandler(error);
   } else if (query.id == null) {
-    var error = new Error('Cannot update document without specifying an id');
+    let error = new Error('Cannot update document without specifying an id');
     error.name = 'CRUDInvalidParams';
     savedHandler(error);
   } else {
-    var tasks = [];
+    let tasks = [];
 
     // If socket does not exist, then the CRUD operation comes from the server-side
     // and we don't need to pass it through a filter.
-    var applyPostFilter;
+    let applyPostFilter;
     if (socket && this.filter) {
       applyPostFilter = this.filter.applyPostFilter.bind(this.filter);
     } else {
@@ -757,7 +757,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
       };
     }
 
-    var filterRequest = {
+    let filterRequest = {
       r: this.thinky.r,
       socket: socket,
       action: 'update',
@@ -765,18 +765,18 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
       query: query
     };
 
-    var modelInstance;
-    var loadModelInstanceAndGetViewData = (cb) => {
+    let modelInstance;
+    let loadModelInstanceAndGetViewData = (cb) => {
       ModelClass.get(query.id).run().then((instance) => {
         modelInstance = instance;
-        var oldAffectedViewData = this.getQueryAffectedViews(query, modelInstance);
+        let oldAffectedViewData = this.getQueryAffectedViews(query, modelInstance);
         cb(null, oldAffectedViewData);
       }).error(cb);
     };
 
     if (query.field) {
       if (query.field === 'id') {
-        var error = new Error('Cannot modify the id field of an existing document');
+        let error = new Error('Cannot modify the id field of an existing document');
         error.name = 'CRUDInvalidOperation';
         savedHandler(error);
       } else {
@@ -804,7 +804,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
             if (err) {
               cb(err);
             } else {
-              var queryValue = query.value || {};
+              let queryValue = query.value || {};
               Object.keys(queryValue).forEach((field) => {
                 modelInstance[field] = queryValue[field];
               });
@@ -813,7 +813,7 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
           });
         });
       } else {
-        var error = new Error('Cannot replace document with a primitive - Must be an object');
+        let error = new Error('Cannot replace document with a primitive - Must be an object');
         error.name = 'CRUDInvalidOperation';
         savedHandler(error);
       }
@@ -834,13 +834,13 @@ SCCRUDRethink.prototype.update = function (query, callback, socket) {
 // This will notify affected views so that they may update themselves
 // in real-time.
 SCCRUDRethink.prototype.delete = function (query, callback, socket) {
-  var validationError = this._validateQuery(query);
+  let validationError = this._validateQuery(query);
   if (validationError) {
     callback && callback(validationError);
     return;
   }
 
-  var deletedHandler = (err, oldAffectedViewData, result) => {
+  let deletedHandler = (err, oldAffectedViewData, result) => {
     if (err) {
       this.emit('warning', err);
     } else {
@@ -849,8 +849,8 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
           type: 'delete'
         });
       } else {
-        var deletedFields;
-        var modelSchema = this.schema[query.type];
+        let deletedFields;
+        let modelSchema = this.schema[query.type];
         if (modelSchema && modelSchema.fields) {
           deletedFields = modelSchema.fields;
         } else {
@@ -873,31 +873,31 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
     callback && callback(err);
   };
 
-  var ModelClass = this.models[query.type];
+  let ModelClass = this.models[query.type];
   if (ModelClass == null) {
-    var error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
+    let error = new Error('The ' + query.type + ' model type is not supported - It is not part of the schema');
     error.name = 'CRUDInvalidModelType';
     deletedHandler(error);
   } else {
-    var tasks = [];
+    let tasks = [];
 
     if (query.id == null) {
-      var error = new Error('Cannot delete an entire collection - ID must be provided');
+      let error = new Error('Cannot delete an entire collection - ID must be provided');
       error.name = 'CRUDInvalidParams';
       deletedHandler(error);
     } else {
-      var modelInstance;
+      let modelInstance;
       tasks.push((cb) => {
         ModelClass.get(query.id).run().then((instance) => {
           modelInstance = instance;
-          var oldAffectedViewData = this.getQueryAffectedViews(query, modelInstance);
+          let oldAffectedViewData = this.getQueryAffectedViews(query, modelInstance);
           cb(null, oldAffectedViewData);
         }).error(cb);
       });
 
       // If socket does not exist, then the CRUD operation comes from the server-side
       // and we don't need to pass it through a filter.
-      var applyPostFilter;
+      let applyPostFilter;
       if (socket && this.filter) {
         applyPostFilter = this.filter.applyPostFilter.bind(this.filter);
       } else {
@@ -906,7 +906,7 @@ SCCRUDRethink.prototype.delete = function (query, callback, socket) {
         };
       }
 
-      var filterRequest = {
+      let filterRequest = {
         r: this.thinky.r,
         socket: socket,
         action: 'delete',
@@ -970,7 +970,7 @@ SCCRUDRethink.prototype._validateRequiredViewParams = function (viewParams) {
   if (viewParams === undefined || viewParams === null) {
     return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} expects viewParams but it was null or undefined`);
   }
-  var viewParamsType = typeof viewParams;
+  let viewParamsType = typeof viewParams;
   if (viewParamsType !== 'object') {
     return new Error(`Invalid view query - The view ${query.view} under the type ${query.type} expects viewParams to be an object instead of ${viewParamsType}`);
   }
@@ -978,16 +978,16 @@ SCCRUDRethink.prototype._validateRequiredViewParams = function (viewParams) {
 };
 
 SCCRUDRethink.prototype._validateViewQuery = function (query) {
-  var viewSchema = this._getView(query.type, query.view);
+  let viewSchema = this._getView(query.type, query.view);
   if (!viewSchema) {
     return new Error(`Invalid view query - The view ${query.view} was not defined in the schema under the type ${query.type}`);
   }
   if (viewSchema.paramFields && viewSchema.paramFields.length > 0) {
-    var viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
+    let viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
     if (viewParamsFormatError) {
       return viewParamsFormatError;
     }
-    var missingFields = [];
+    let missingFields = [];
     viewSchema.paramFields.forEach((field) => {
       if (query.viewParams[field] === undefined) {
         missingFields.push(field);
@@ -998,11 +998,11 @@ SCCRUDRethink.prototype._validateViewQuery = function (query) {
     }
   }
   if (viewSchema.primaryKeys && viewSchema.primaryKeys.length > 0) {
-    var viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
+    let viewParamsFormatError = this._validateRequiredViewParams(query.viewParams)
     if (viewParamsFormatError) {
       return viewParamsFormatError;
     }
-    var missingFields = [];
+    let missingFields = [];
     viewSchema.primaryKeys.forEach((field) => {
       if (query.viewParams[field] === undefined) {
         missingFields.push(field);
@@ -1019,7 +1019,7 @@ SCCRUDRethink.prototype._validateQuery = function (query) {
   if (query === undefined || query === null) {
     return new Error(`Invalid query - The query was null or undefined`);
   }
-  var queryType = typeof query;
+  let queryType = typeof query;
   if (queryType !== 'object') {
     return new Error(`Invalid query - The query must be an object instead of ${queryType}`);
   }
@@ -1029,10 +1029,10 @@ SCCRUDRethink.prototype._validateQuery = function (query) {
   if (!this.schema[query.type]) {
     return new Error(`Invalid query - The query type ${query.type} was not defined on the schema`);
   }
-  var fieldIsSet = query.field !== undefined && query.field !== null;
-  var idIsSet = query.id !== undefined && query.id !== null;
+  let fieldIsSet = query.field !== undefined && query.field !== null;
+  let idIsSet = query.id !== undefined && query.id !== null;
   if (fieldIsSet) {
-    var fieldType = typeof query.field;
+    let fieldType = typeof query.field;
     if (fieldType !== 'string') {
       return new Error(`Invalid field query - The field property must be a string instead of ${fieldType}`);
     }
@@ -1041,14 +1041,14 @@ SCCRUDRethink.prototype._validateQuery = function (query) {
     }
   }
   if (idIsSet) {
-    var idType = typeof query.id;
+    let idType = typeof query.id;
     if (idType !== 'string') {
       return new Error(`Invalid resource query - The resource id must be a string instead of ${idType}`);
     }
   }
-  var viewIsSet = query.view !== undefined && query.view !== null;
+  let viewIsSet = query.view !== undefined && query.view !== null;
   if (viewIsSet) {
-    var viewQueryError = this._validateViewQuery(query);
+    let viewQueryError = this._validateViewQuery(query);
     if (viewQueryError) {
       return viewQueryError;
     }

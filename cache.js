@@ -1,6 +1,6 @@
-var EventEmitter = require('events').EventEmitter;
+const EventEmitter = require('events').EventEmitter;
 
-var Cache = function (options) {
+let Cache = function (options) {
   this._cache = {};
   this._watchers = {};
   this.options = options || {};
@@ -28,17 +28,17 @@ Cache.prototype.set = function (query, data, resourcePath) {
   if (!resourcePath) {
     resourcePath = this._getResourcePath(query);
   }
-  var entry = {
+  let entry = {
     resource: data
   };
 
-  var existingCache = this._cache[resourcePath];
+  let existingCache = this._cache[resourcePath];
   if (existingCache && existingCache.timeout) {
     clearTimeout(existingCache.timeout);
   }
 
   entry.timeout = setTimeout(() => {
-    var freshEntry = this._cache[resourcePath] || {};
+    let freshEntry = this._cache[resourcePath] || {};
     delete this._cache[resourcePath];
     this.emit('expire', this._simplifyQuery(query), freshEntry);
   }, this.cacheDuration);
@@ -47,9 +47,9 @@ Cache.prototype.set = function (query, data, resourcePath) {
 };
 
 Cache.prototype.clear = function (query) {
-  var resourcePath = this._getResourcePath(query);
+  let resourcePath = this._getResourcePath(query);
 
-  var entry = this._cache[resourcePath];
+  let entry = this._cache[resourcePath];
   if (entry) {
     if (entry.timeout) {
       clearTimeout(entry.timeout);
@@ -63,7 +63,7 @@ Cache.prototype.get = function (query, resourcePath) {
   if (!resourcePath) {
     resourcePath = this._getResourcePath(query);
   }
-  var entry = this._cache[resourcePath] || {};
+  let entry = this._cache[resourcePath] || {};
   return entry.resource;
 };
 
@@ -75,7 +75,7 @@ Cache.prototype._pushWatcher = function (resourcePath, watcher) {
 };
 
 Cache.prototype._processCacheWatchers = function (resourcePath, error, data) {
-  var watcherList = this._watchers[resourcePath] || [];
+  let watcherList = this._watchers[resourcePath] || [];
 
   if (error) {
     watcherList.forEach((watcher) => {
@@ -95,14 +95,14 @@ Cache.prototype.pass = function (query, provider, callback) {
     return;
   }
 
-  var resourcePath = this._getResourcePath(query);
+  let resourcePath = this._getResourcePath(query);
   if (!resourcePath) {
     // Bypass cache for unidentified resources.
     provider(callback);
     return;
   }
 
-  var cacheEntry = this.get(query, resourcePath);
+  let cacheEntry = this.get(query, resourcePath);
 
   this._pushWatcher(resourcePath, callback);
 
@@ -123,16 +123,16 @@ Cache.prototype.pass = function (query, provider, callback) {
 
     provider((err, data) => {
       if (!err) {
-        var freshCacheEntry = this._cache[resourcePath];
+        let freshCacheEntry = this._cache[resourcePath];
 
         if (freshCacheEntry) {
-          var cacheEntryPatch = freshCacheEntry.patch || {};
+          let cacheEntryPatch = freshCacheEntry.patch || {};
           Object.keys(cacheEntryPatch).forEach((field) => {
             data[field] = cacheEntryPatch[field];
           });
         }
 
-        var newCacheEntry = {
+        let newCacheEntry = {
           resource: data
         };
 
@@ -148,27 +148,27 @@ Cache.prototype.update = function (resourceChannelString, data) {
   if (!data || data.type !== 'update' || !data.hasOwnProperty('value')) {
     return;
   }
-  var parts = resourceChannelString.split('>');
-  var crudString = parts[0];
+  let parts = resourceChannelString.split('>');
+  let crudString = parts[0];
   if (crudString !== 'crud') {
     return;
   }
-  var resourceChannel = parts[1];
-  var resourceParts = resourceChannel.split('/');
-  var field = resourceParts[2];
+  let resourceChannel = parts[1];
+  let resourceParts = resourceChannel.split('/');
+  let field = resourceParts[2];
 
-  var query = {
+  let query = {
     type: resourceParts[0],
     id: resourceParts[1],
     field: field
   };
 
   if (query.type && query.id && field) {
-    var resourcePath = this._getResourcePath(query);
+    let resourcePath = this._getResourcePath(query);
     if (resourcePath) {
-      var cacheEntry = this.get(query, resourcePath);
+      let cacheEntry = this.get(query, resourcePath);
       if (cacheEntry) {
-        var oldValue;
+        let oldValue;
         if (cacheEntry.pending) {
           oldValue = null;
           cacheEntry.patch[field] = data.value;
