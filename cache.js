@@ -25,7 +25,6 @@ Cache.prototype._simplifyQuery = function (query) {
 };
 
 Cache.prototype.set = function (query, data, resourcePath) {
-  var self = this;
   if (!resourcePath) {
     resourcePath = this._getResourcePath(query);
   }
@@ -38,10 +37,10 @@ Cache.prototype.set = function (query, data, resourcePath) {
     clearTimeout(existingCache.timeout);
   }
 
-  entry.timeout = setTimeout(function () {
-    var freshEntry = self._cache[resourcePath] || {};
-    delete self._cache[resourcePath];
-    self.emit('expire', self._simplifyQuery(query), freshEntry);
+  entry.timeout = setTimeout(() => {
+    var freshEntry = this._cache[resourcePath] || {};
+    delete this._cache[resourcePath];
+    this.emit('expire', this._simplifyQuery(query), freshEntry);
   }, this.cacheDuration);
 
   this._cache[resourcePath] = entry;
@@ -79,11 +78,11 @@ Cache.prototype._processCacheWatchers = function (resourcePath, error, data) {
   var watcherList = this._watchers[resourcePath] || [];
 
   if (error) {
-    watcherList.forEach(function (watcher) {
+    watcherList.forEach((watcher) => {
       watcher(error);
     });
   } else {
-    watcherList.forEach(function (watcher) {
+    watcherList.forEach((watcher) => {
       watcher(null, data);
     });
   }
@@ -91,8 +90,6 @@ Cache.prototype._processCacheWatchers = function (resourcePath, error, data) {
 };
 
 Cache.prototype.pass = function (query, provider, callback) {
-  var self = this;
-
   if (this.cacheDisabled) {
     provider(callback);
     return;
@@ -112,7 +109,7 @@ Cache.prototype.pass = function (query, provider, callback) {
   if (cacheEntry) {
     this.emit('hit', query, cacheEntry);
     if (!cacheEntry.pending) {
-      self._processCacheWatchers(resourcePath, null, cacheEntry.resource);
+      this._processCacheWatchers(resourcePath, null, cacheEntry.resource);
     }
   } else {
     this.emit('miss', query);
@@ -124,13 +121,13 @@ Cache.prototype.pass = function (query, provider, callback) {
     this.set(query, cacheEntry, resourcePath);
     this.emit('set', this._simplifyQuery(query), cacheEntry);
 
-    provider(function (err, data) {
+    provider((err, data) => {
       if (!err) {
-        var freshCacheEntry = self._cache[resourcePath];
+        var freshCacheEntry = this._cache[resourcePath];
 
         if (freshCacheEntry) {
           var cacheEntryPatch = freshCacheEntry.patch || {};
-          Object.keys(cacheEntryPatch).forEach(function (field) {
+          Object.keys(cacheEntryPatch).forEach((field) => {
             data[field] = cacheEntryPatch[field];
           });
         }
@@ -139,10 +136,10 @@ Cache.prototype.pass = function (query, provider, callback) {
           resource: data
         };
 
-        self.set(query, newCacheEntry, resourcePath);
-        self.emit('set', self._simplifyQuery(query), newCacheEntry);
+        this.set(query, newCacheEntry, resourcePath);
+        this.emit('set', this._simplifyQuery(query), newCacheEntry);
       }
-      self._processCacheWatchers(resourcePath, err, data);
+      this._processCacheWatchers(resourcePath, err, data);
     });
   }
 };
